@@ -261,7 +261,7 @@ class Tamil99KeyboardLayout:
         
         Handles:
         - Standalone characters (vowels, consonants)
-        - Consonant-vowel combinations (e.g., கா = hq)
+        - Consonant-vowel combinations (e.g., கா = hq, டு = od)
         - Consonants with pulli (e.g., க் = hf)
         - Multi-character sequences
         - Tamil numerals and special characters
@@ -275,6 +275,20 @@ class Tamil99KeyboardLayout:
             if char == ' ':
                 sequence.append(('Space', False))
                 i += 1
+            # First, check for combined characters (consonant + vowel sign)
+            # This handles cases like "டு" which should be "od", not "o" + "^d"
+            elif i + 1 < len(tamil_text):
+                combined = char + tamil_text[i + 1]
+                if combined in cls.CHAR_TO_KEYSTROKES:
+                    # Found a combined character (e.g., "டு" = "od")
+                    key_seq = cls.CHAR_TO_KEYSTROKES[combined]
+                    # Process the key sequence
+                    for k in key_seq:
+                        is_upper = k.isupper()
+                        sequence.append((k.upper(), is_upper))
+                    i += 2
+                    continue
+            # Check if current character is in mapping
             elif char in cls.CHAR_TO_KEYSTROKES:
                 key_seq = cls.CHAR_TO_KEYSTROKES[char]
                 # Process each key in the sequence
@@ -287,7 +301,8 @@ class Tamil99KeyboardLayout:
                         num_key = key_seq[2]
                         sequence.append((num_key.upper(), False))
                 elif key_seq.startswith('^'):
-                    # Vowel sign or special: ^q -> press ^ then q
+                    # Vowel sign: ^q -> press ^ then q
+                    # But note: standalone vowel signs are rare - usually they're combined with consonants
                     sequence.append(('^', False))
                     if len(key_seq) > 1:
                         vowel_key = key_seq[1]
@@ -300,31 +315,6 @@ class Tamil99KeyboardLayout:
                         sequence.append((k.upper(), is_upper))
                 i += 1
             else:
-                # Try to handle combined characters (consonant + vowel sign)
-                # Check if this is a combining character sequence
-                if i + 1 < len(tamil_text):
-                    next_char = tamil_text[i + 1]
-                    # Check if next char is a vowel sign
-                    if next_char in cls.CHAR_TO_KEYSTROKES:
-                        vowel_key_seq = cls.CHAR_TO_KEYSTROKES[next_char]
-                        # If it's a vowel sign (starts with ^), try combination
-                        if vowel_key_seq.startswith('^') and char in cls.CHAR_TO_KEYSTROKES:
-                            consonant_key_seq = cls.CHAR_TO_KEYSTROKES[char]
-                            # If consonant is single key, create combination
-                            if len(consonant_key_seq) == 1 and not consonant_key_seq.startswith('^'):
-                                # Add consonant key
-                                cons_key = consonant_key_seq[0]
-                                is_upper = cons_key.isupper()
-                                sequence.append((cons_key.upper(), is_upper))
-                                # Add vowel sign (^ + vowel key)
-                                sequence.append(('^', False))
-                                if len(vowel_key_seq) > 1:
-                                    vowel_key = vowel_key_seq[1]
-                                    is_upper = vowel_key.isupper()
-                                    sequence.append((vowel_key.upper(), is_upper))
-                                i += 2
-                                continue
-                
                 # Fallback for unmapped characters
                 if char.isalpha():
                     sequence.append((char.upper(), char.isupper()))
