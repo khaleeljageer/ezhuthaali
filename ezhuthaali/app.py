@@ -4,9 +4,9 @@ import sys
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-from thattachu.core.progress import ProgressStore
-from thattachu.core.levels import LevelRepository
-from thattachu.ui.main_window import MainWindow
+from ezhuthaali.core.progress import ProgressStore
+from ezhuthaali.core.levels import LevelRepository
+from ezhuthaali.ui.main_window import MainWindow
 
 
 def configure_logging() -> None:

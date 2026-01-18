@@ -15,7 +15,7 @@ class LevelProgress:
 
 class ProgressStore:
     def __init__(self) -> None:
-        self._file_path = Path.home() / ".thattachu" / "progress.json"
+        self._file_path = Path.home() / ".ezhuthaali" / "progress.json"
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
         self._progress = self._load()
 

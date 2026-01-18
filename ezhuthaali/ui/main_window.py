@@ -27,10 +27,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from thattachu.core.levels import LevelRepository, Level
-from thattachu.core.progress import ProgressStore
-from thattachu.core.session import TypingSession, TaskResult
-from thattachu.core.keystroke_tracker import KeystrokeTracker, Tamil99KeyboardLayout
+from ezhuthaali.core.levels import LevelRepository, Level
+from ezhuthaali.core.progress import ProgressStore
+from ezhuthaali.core.session import TypingSession, TaskResult
+from ezhuthaali.core.keystroke_tracker import KeystrokeTracker, Tamil99KeyboardLayout
 
 
 @dataclass
@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self._shift_labels: list[QLabel] = []
         self._current_task_text: str = ""
         self._task_display_offset: int = 0
-        self._unlock_all_levels = os.environ.get("THATTACHU_UNLOCK_ALL") == "1"
+        self._unlock_all_levels = os.environ.get("EZUTHALI_UNLOCK_ALL") == "1"
         self._input_has_error = False
         
         # Gamification stats
@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
         }
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("தட்டச்சு - தமிழ்99 பயிற்சி")
+        self.setWindowTitle("எழுத்தாளி - தமிழ்99 பயிற்சி")
         self.setMinimumSize(1200, 800)
         
         colors = self._get_theme_colors()
