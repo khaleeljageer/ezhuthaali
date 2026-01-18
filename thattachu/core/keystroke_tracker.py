@@ -288,8 +288,9 @@ class Tamil99KeyboardLayout:
                         sequence.append((k.upper(), is_upper))
                     i += 2
                     continue
+                # Combined not found, fall through to check single character
             # Check if current character is in mapping
-            elif char in cls.CHAR_TO_KEYSTROKES:
+            if char in cls.CHAR_TO_KEYSTROKES:
                 key_seq = cls.CHAR_TO_KEYSTROKES[char]
                 # Process each key in the sequence
                 # Handle special prefixes like ^, ^#

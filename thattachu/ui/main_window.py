@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import html
 import re
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -51,7 +52,7 @@ class MainWindow(QMainWindow):
         self._shift_labels: list[QLabel] = []
         self._current_task_text: str = ""
         self._task_display_offset: int = 0
-        self._unlock_all_levels = True #os.environ.get("THATTACHU_UNLOCK_ALL") == "1"
+        self._unlock_all_levels = os.environ.get("THATTACHU_UNLOCK_ALL") == "1"
         self._input_has_error = False
         
         # Keystroke tracking
@@ -405,14 +406,60 @@ class MainWindow(QMainWindow):
         self._keystroke_to_char_map = {}
         keystroke_idx = 0
         target = self._current_task_text
+        i = 0
         
-        for char_idx, char in enumerate(target):
-            # Get keystroke sequence for this character
-            char_sequence = self._tamil99_layout.get_keystroke_sequence(char)
-            # Map all keystrokes for this character to the character index
-            for _ in char_sequence:
-                self._keystroke_to_char_map[keystroke_idx] = char_idx
+        # Process text the same way get_keystroke_sequence does
+        # to correctly handle combined characters
+        while i < len(target):
+            char = target[i]
+            
+            if char == ' ':
+                self._keystroke_to_char_map[keystroke_idx] = i
                 keystroke_idx += 1
+                i += 1
+            # Check for combined characters first (same logic as get_keystroke_sequence)
+            elif i + 1 < len(target):
+                combined = char + target[i + 1]
+                if combined in self._tamil99_layout.CHAR_TO_KEYSTROKES:
+                    # Found combined character (e.g., "து" = "ld")
+                    key_seq = self._tamil99_layout.CHAR_TO_KEYSTROKES[combined]
+                    # Map all keystrokes for this combined character to the first character index
+                    for _ in key_seq:
+                        self._keystroke_to_char_map[keystroke_idx] = i
+                        keystroke_idx += 1
+                    i += 2  # Skip both characters
+                    continue
+            # Single character
+            if char in self._tamil99_layout.CHAR_TO_KEYSTROKES:
+                key_seq = self._tamil99_layout.CHAR_TO_KEYSTROKES[char]
+                # Handle special prefixes
+                if key_seq.startswith('^#'):
+                    # Tamil numeral: ^#1
+                    self._keystroke_to_char_map[keystroke_idx] = i
+                    keystroke_idx += 1  # ^
+                    self._keystroke_to_char_map[keystroke_idx] = i
+                    keystroke_idx += 1  # #
+                    if len(key_seq) > 2:
+                        self._keystroke_to_char_map[keystroke_idx] = i
+                        keystroke_idx += 1  # number
+                elif key_seq.startswith('^'):
+                    # Vowel sign: ^q
+                    self._keystroke_to_char_map[keystroke_idx] = i
+                    keystroke_idx += 1  # ^
+                    if len(key_seq) > 1:
+                        self._keystroke_to_char_map[keystroke_idx] = i
+                        keystroke_idx += 1  # vowel key
+                else:
+                    # Regular sequence
+                    for _ in key_seq:
+                        self._keystroke_to_char_map[keystroke_idx] = i
+                        keystroke_idx += 1
+                i += 1
+            else:
+                # Fallback
+                self._keystroke_to_char_map[keystroke_idx] = i
+                keystroke_idx += 1
+                i += 1
 
     def _set_input_text(self, text: str) -> None:
         self._auto_submit_block = True
@@ -429,37 +476,30 @@ class MainWindow(QMainWindow):
     
     def _on_key_press(self, event: QKeyEvent) -> bool:
         """Handle individual key press events"""
-        if not self._session or self._keystroke_index >= len(self._keystroke_sequence):
+        if not self._session:
             return False
         
         # Get the pressed key
         key = event.key()
         text = event.text()
         
-        # Handle special keys
+        # Handle special keys - check space first (even when task is complete)
         if key == Qt.Key.Key_Space:
+            # If task is complete, space submits and moves to next task
+            if self._keystroke_index >= len(self._keystroke_sequence):
+                self._submit_task_from_keystrokes()
+                return True
+            # Otherwise, space is part of the task - need to check we're not past the sequence
+            if self._keystroke_index >= len(self._keystroke_sequence):
+                return False
             pressed_key = "Space"
         elif key == Qt.Key.Key_Backspace:
             # Allow backspace to correct mistakes
             if self._typed_keystrokes and self._keystroke_index > 0:
                 self._typed_keystrokes.pop()
                 self._keystroke_index -= 1
-                # Remove the last character from typed Tamil text if we've gone back past its keystrokes
-                if self._keystroke_index in self._keystroke_to_char_map:
-                    char_idx = self._keystroke_to_char_map[self._keystroke_index]
-                    # Find the first keystroke for this character
-                    first_ks_for_char = None
-                    for ks_idx, c_idx in self._keystroke_to_char_map.items():
-                        if c_idx == char_idx:
-                            first_ks_for_char = ks_idx
-                            break
-                    # If we're before the first keystroke of the current character, remove it
-                    if first_ks_for_char is not None and self._keystroke_index < first_ks_for_char:
-                        if char_idx < len(self._typed_tamil_text):
-                            self._typed_tamil_text = self._typed_tamil_text[:char_idx]
-                    elif self._keystroke_index == first_ks_for_char and char_idx < len(self._typed_tamil_text):
-                        # We're at the start of a character, remove it
-                        self._typed_tamil_text = self._typed_tamil_text[:char_idx]
+                # Reconstruct Tamil text from remaining keystrokes
+                self._update_typed_tamil_text_from_keystrokes()
                 self._input_has_error = False
                 self._set_input_error_state(False)
                 self._update_display_from_keystrokes()
@@ -472,12 +512,15 @@ class MainWindow(QMainWindow):
             return True
         elif text and text.isprintable():
             # Get the key label (uppercase for letters)
+            # But first check if task is complete - ignore other keys if so
+            if self._keystroke_index >= len(self._keystroke_sequence):
+                return False
             pressed_key = text.upper() if text.isalpha() else text
         else:
             # Ignore other keys
             return False
         
-        # Get expected key
+        # Get expected key (we know we're not past the sequence here)
         expected_key, needs_shift = self._keystroke_sequence[self._keystroke_index]
         
         # Record the keystroke
@@ -486,23 +529,10 @@ class MainWindow(QMainWindow):
         # Update typed keystrokes
         if result['is_correct']:
             self._typed_keystrokes.append(pressed_key)
-            prev_keystroke_idx = self._keystroke_index
             self._keystroke_index += 1
             
-            # Update typed Tamil text - check if we've moved to a new character
-            if prev_keystroke_idx in self._keystroke_to_char_map:
-                prev_char_idx = self._keystroke_to_char_map[prev_keystroke_idx]
-                # Check if current keystroke belongs to a different character
-                if self._keystroke_index < len(self._keystroke_sequence):
-                    current_char_idx = self._keystroke_to_char_map.get(self._keystroke_index, prev_char_idx)
-                    # If we've moved to a new character, add the previous character to typed text
-                    if current_char_idx > prev_char_idx and prev_char_idx >= len(self._typed_tamil_text):
-                        if prev_char_idx < len(self._current_task_text):
-                            self._typed_tamil_text += self._current_task_text[prev_char_idx]
-                else:
-                    # Last keystroke - add the last character
-                    if prev_char_idx < len(self._current_task_text) and prev_char_idx >= len(self._typed_tamil_text):
-                        self._typed_tamil_text += self._current_task_text[prev_char_idx]
+            # Reconstruct Tamil text from typed keystrokes
+            self._update_typed_tamil_text_from_keystrokes()
             
             self._input_has_error = False
             self._set_input_error_state(False)
@@ -516,11 +546,103 @@ class MainWindow(QMainWindow):
         self._update_keyboard_hint()
         self._update_stats_from_tracker()
         
-        # Check if task is complete
-        if self._keystroke_index >= len(self._keystroke_sequence):
-            self._submit_task_from_keystrokes()
+        # Note: Task completion no longer auto-submits
+        # User must press space to move to next task
         
         return True
+    
+    def _update_typed_tamil_text_from_keystrokes(self) -> None:
+        """Reconstruct Tamil text from typed keystrokes"""
+        # Process the target text and match keystrokes to characters
+        target = self._current_task_text
+        typed_ks_count = len(self._typed_keystrokes)
+        
+        # Reconstruct by processing target text character by character
+        reconstructed = ""
+        keystroke_idx = 0
+        i = 0
+        
+        while i < len(target) and keystroke_idx < typed_ks_count:
+            char = target[i]
+            
+            if char == ' ':
+                if keystroke_idx < typed_ks_count and self._typed_keystrokes[keystroke_idx] == "Space":
+                    reconstructed += " "
+                    keystroke_idx += 1
+                i += 1
+            # Check for combined characters first
+            elif i + 1 < len(target):
+                combined = char + target[i + 1]
+                if combined in self._tamil99_layout.CHAR_TO_KEYSTROKES:
+                    key_seq = self._tamil99_layout.CHAR_TO_KEYSTROKES[combined]
+                    # Check if we have enough keystrokes for this combined character
+                    if keystroke_idx + len(key_seq) <= typed_ks_count:
+                        # Verify the keystrokes match
+                        matches = True
+                        for j, expected_key in enumerate(key_seq):
+                            typed_key = self._typed_keystrokes[keystroke_idx + j].upper()
+                            expected_key_upper = expected_key.upper()
+                            if typed_key != expected_key_upper:
+                                matches = False
+                                break
+                        if matches:
+                            reconstructed += combined
+                            keystroke_idx += len(key_seq)
+                            i += 2
+                            continue
+            # Single character
+            if char in self._tamil99_layout.CHAR_TO_KEYSTROKES:
+                key_seq = self._tamil99_layout.CHAR_TO_KEYSTROKES[char]
+                # Handle special prefixes
+                if key_seq.startswith('^#'):
+                    # Tamil numeral: ^#1
+                    required_keys = 3 if len(key_seq) > 2 else 2
+                    if keystroke_idx + required_keys <= typed_ks_count:
+                        # Verify keystrokes match
+                        if (self._typed_keystrokes[keystroke_idx].upper() == '^' and
+                            keystroke_idx + 1 < typed_ks_count and
+                            self._typed_keystrokes[keystroke_idx + 1].upper() == '#'):
+                            if len(key_seq) > 2:
+                                if (keystroke_idx + 2 < typed_ks_count and
+                                    self._typed_keystrokes[keystroke_idx + 2].upper() == key_seq[2].upper()):
+                                    reconstructed += char
+                                    keystroke_idx += required_keys
+                                    i += 1
+                                    continue
+                elif key_seq.startswith('^'):
+                    # Vowel sign: ^q
+                    required_keys = 2 if len(key_seq) > 1 else 1
+                    if keystroke_idx + required_keys <= typed_ks_count:
+                        # Verify keystrokes match
+                        if self._typed_keystrokes[keystroke_idx].upper() == '^':
+                            if len(key_seq) > 1:
+                                if (keystroke_idx + 1 < typed_ks_count and
+                                    self._typed_keystrokes[keystroke_idx + 1].upper() == key_seq[1].upper()):
+                                    reconstructed += char
+                                    keystroke_idx += required_keys
+                                    i += 1
+                                    continue
+                else:
+                    # Regular sequence
+                    if keystroke_idx + len(key_seq) <= typed_ks_count:
+                        # Verify keystrokes match
+                        matches = True
+                        for j, expected_key in enumerate(key_seq):
+                            typed_key = self._typed_keystrokes[keystroke_idx + j].upper()
+                            expected_key_upper = expected_key.upper()
+                            if typed_key != expected_key_upper:
+                                matches = False
+                                break
+                        if matches:
+                            reconstructed += char
+                            keystroke_idx += len(key_seq)
+                            i += 1
+                            continue
+            
+            # If we can't match, break
+            break
+        
+        self._typed_tamil_text = reconstructed
     
     def _update_display_from_keystrokes(self) -> None:
         """Update the display based on typed keystrokes"""
@@ -773,7 +895,24 @@ class MainWindow(QMainWindow):
                 for shift_label in self._shift_labels:
                     self._highlight_key(shift_label, is_shift=True)
         else:
+            # Task is complete - highlight space bar to indicate user should press space for next task
             self._clear_keyboard_highlight()
+            if "Space" in self._key_labels:
+                # Use a different color to indicate "next task" action
+                space_label = self._key_labels["Space"]
+                space_label.setStyleSheet(
+                    "QLabel {"
+                    "  background: #48bb78;"
+                    "  color: #ffffff;"
+                    "  border: 2px solid #38a169;"
+                    "  border-radius: 6px;"
+                    "  padding: 12px 8px;"
+                    "  font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';"
+                    "  font-size: 18px;"
+                    "  font-weight: 600;"
+                    "}"
+                )
+                self._highlighted_keys.append(space_label)
     
     def _build_keystroke_sequence(self, text: str) -> list[tuple[str, bool]]:
         """Build the keystroke sequence for Tamil99 text."""
