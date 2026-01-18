@@ -767,6 +767,23 @@ class MainWindow(QMainWindow):
                             keystroke_idx += len(key_seq)
                             i += 1
                             continue
+            else:
+                # Fallback for punctuation and other characters not in CHAR_TO_KEYSTROKES
+                # Check if the next keystroke matches this character
+                if keystroke_idx < typed_ks_count:
+                    typed_key = self._typed_keystrokes[keystroke_idx]
+                    # Get the expected key for this character using _map_char_to_key
+                    key_label, needs_shift = self._map_char_to_key(char)
+                    
+                    # Check if typed key matches the expected key
+                    # Normalize for comparison (handle both direct match and key label match)
+                    if (typed_key == char or 
+                        typed_key.upper() == char.upper() or
+                        typed_key.upper() == key_label.upper()):
+                        reconstructed += char
+                        keystroke_idx += 1
+                        i += 1
+                        continue
             
             # If we can't match, break
             break
