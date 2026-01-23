@@ -8,9 +8,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QShortcut, QKeyEvent
-from PySide6.QtCore import QObject
+from PySide6.QtCore import Qt, QTimer, QObject
+from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -290,7 +289,7 @@ class MainWindow(QMainWindow):
             padding: 24px 28px;
             font-size: 26px;
             font-weight: 400;
-            font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+            font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
             min-height: 100px;
         """)
         self.task_display.setMinimumHeight(100)
@@ -321,7 +320,7 @@ class MainWindow(QMainWindow):
                 padding: 24px 28px;
                 font-size: 26px;
                 font-weight: 400;
-                font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+                font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
             }}
             QLineEdit:focus {{
                 border: 2px solid {colors['highlight']};
@@ -373,16 +372,31 @@ class MainWindow(QMainWindow):
         top_row.addLayout(right_panel, 3)
         layout.addLayout(top_row)
 
-        keyboard_header = QLabel("⌨️ தமிழ்99 விசைப்பலகை")
-        keyboard_header.setStyleSheet(f"""
-            font-size: 18px;
-            font-weight: 600;
-            color: {colors['text_secondary']};
-            padding: 12px 0px;
-            background: transparent;
-        """)
-        layout.addWidget(keyboard_header, alignment=Qt.AlignHCenter)
+        # Bottom row: Hand image on left, Keyboard on right
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(20)
         
+        # Hand image on the left
+        hands_image_path = Path(__file__).parent.parent / "assets" / "hands.png"
+        if hands_image_path.exists():
+            hands_image_label = QLabel()
+            pixmap = QPixmap(str(hands_image_path))
+            # Scale image to fit width while maintaining aspect ratio
+            max_width = 400
+            if pixmap.width() > max_width:
+                pixmap = pixmap.scaledToWidth(max_width, Qt.SmoothTransformation)
+            hands_image_label.setPixmap(pixmap)
+            hands_image_label.setAlignment(Qt.AlignCenter)
+            hands_image_label.setStyleSheet(f"""
+                background: {colors['bg_container']};
+                border-radius: 12px;
+                padding: 12px;
+            """)
+            hands_image_label.setMinimumWidth(400)
+            hands_image_label.setMaximumWidth(450)
+            bottom_row.addWidget(hands_image_label, 1)
+        
+        # Keyboard on the right
         keyboard_container = self._build_keyboard()
         keyboard_container.setMinimumSize(980, 400)
         keyboard_container.setStyleSheet(f"""
@@ -391,13 +405,10 @@ class MainWindow(QMainWindow):
             border-radius: 16px;
             padding: 20px;
         """)
-        keyboard_wrapper = QWidget()
-        keyboard_layout = QHBoxLayout(keyboard_wrapper)
-        keyboard_layout.setContentsMargins(0, 0, 0, 0)
-        keyboard_layout.addStretch(1)
-        keyboard_layout.addWidget(keyboard_container)
-        keyboard_layout.addStretch(1)
-        layout.addWidget(keyboard_wrapper)
+        bottom_row.addWidget(keyboard_container, 3)
+        
+        layout.addLayout(bottom_row)
+        
         self.setCentralWidget(root)
 
         self.start_shortcut = QShortcut(Qt.CTRL | Qt.Key_Return, self)
@@ -864,7 +875,7 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-radius: 6px;
                 padding: 12px 8px;
-                font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
                 font-size: 18px;
                 font-weight: 400;
             }}
@@ -964,14 +975,14 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
                     font-size: 18px;
                     font-weight: 400;
                 }}
             """)
         self._highlighted_keys = []
 
-    def _highlight_key(self, label: QLabel, is_shift: bool = False) -> None:
+    def _highlight_key(self, label: QLabel, key_label: str = "", is_shift: bool = False) -> None:
         colors = self._get_theme_colors()
         if is_shift:
             style = f"""
@@ -981,7 +992,7 @@ class MainWindow(QMainWindow):
                     border: 2px solid {colors['key_shift']};
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
                     font-size: 18px;
                     font-weight: 500;
                 }}
@@ -994,7 +1005,7 @@ class MainWindow(QMainWindow):
                     border: 2px solid {colors['key_highlight']};
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
                     font-size: 18px;
                     font-weight: 500;
                 }}
@@ -1015,10 +1026,10 @@ class MainWindow(QMainWindow):
                 key_label = "Space"
             
             if key_label in self._key_labels:
-                self._highlight_key(self._key_labels[key_label])
+                self._highlight_key(self._key_labels[key_label], key_label=key_label)
             if needs_shift:
                 for shift_label in self._shift_labels:
-                    self._highlight_key(shift_label, is_shift=True)
+                    self._highlight_key(shift_label, key_label="Shift", is_shift=True)
         else:
             # Task is complete - highlight space bar to indicate user should press space for next task
             self._clear_keyboard_highlight()
@@ -1032,7 +1043,7 @@ class MainWindow(QMainWindow):
                         border: 2px solid {colors['success']};
                         border-radius: 6px;
                         padding: 12px 8px;
-                        font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                        font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
                         font-size: 18px;
                         font-weight: 500;
                     }}
@@ -1304,7 +1315,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
                 }}
             """)
         else:
@@ -1317,7 +1328,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
                 }}
                 QLineEdit:focus {{
                     border: 2px solid {colors['highlight']};
