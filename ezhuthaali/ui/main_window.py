@@ -5,11 +5,12 @@ import html
 import re
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QObject
-from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap
+from PySide6.QtCore import Qt, QTimer, QObject, QSize
+from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap, QGuiApplication, QFontDatabase
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QSizePolicy,
     QStyle,
     QVBoxLayout,
     QWidget,
@@ -37,6 +39,47 @@ class LevelState:
     level: Level
     unlocked: bool
     completed: int
+
+
+class AspectRatioWidget(QWidget):
+    """Widget that maintains a fixed aspect ratio"""
+    def __init__(self, aspect_ratio: float = 2.45, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._aspect_ratio = aspect_ratio
+        # Use Expanding policy for both to allow proper scaling
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    
+    def setAspectRatio(self, aspect_ratio: float) -> None:
+        """Set the aspect ratio (width/height)"""
+        self._aspect_ratio = aspect_ratio
+        self.updateGeometry()
+    
+    def hasHeightForWidth(self) -> bool:
+        """Return True to indicate this widget has height-for-width behavior"""
+        return True
+    
+    def heightForWidth(self, width: int) -> int:
+        """Return the height that maintains aspect ratio for given width"""
+        if width > 0:
+            return int(width / self._aspect_ratio)
+        return 400
+    
+    def sizeHint(self) -> QSize:
+        """Return a size hint that maintains aspect ratio"""
+        # Default size based on aspect ratio
+        width = 980
+        height = int(width / self._aspect_ratio)
+        return QSize(width, height)
+    
+    def minimumSizeHint(self) -> QSize:
+        """Return minimum size hint"""
+        return QSize(980, int(980 / self._aspect_ratio))
+    
+    def resizeEvent(self, event) -> None:
+        """Override resize to maintain aspect ratio when layout doesn't respect heightForWidth"""
+        # Don't constrain height - let the layout handle it via heightForWidth
+        # This allows the keyboard to expand and show all text properly
+        super().resizeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -72,36 +115,91 @@ class MainWindow(QMainWindow):
         self._typed_keystrokes: list[str] = []  # Track actual keys pressed
         self._typed_tamil_text: str = ""  # Track typed Tamil text
 
+        # Load Marutham font from assets
+        self._load_marutham_font()
+
         self._build_ui()
         self._refresh_levels_list()
         QTimer.singleShot(0, self.showMaximized)
 
+    def _load_marutham_font(self) -> None:
+        """Load Marutham font from assets"""
+        font_path = Path(__file__).parent.parent / "assets" / "TAU-Marutham.ttf"
+        if font_path.exists():
+            font_id = QFontDatabase.addApplicationFont(str(font_path))
+            if font_id != -1:
+                font_families = QFontDatabase.applicationFontFamilies(font_id)
+                if font_families:
+                    self._marutham_font_family = font_families[0]
+                    logging.info(f"Loaded Marutham font: {self._marutham_font_family}")
+                else:
+                    self._marutham_font_family = "TAU-Marutham"
+            else:
+                self._marutham_font_family = "TAU-Marutham"
+        else:
+            self._marutham_font_family = "TAU-Marutham"
+            logging.warning(f"Marutham font not found at {font_path}")
+
     def _get_theme_colors(self) -> dict:
-        """Get dark theme color palette"""
+        """Get light theme color palette"""
         return {
-            'bg_main': '#1a202c',
-            'bg_container': '#2d3748',
-            'bg_card': '#4a5568',
-            'bg_input': '#4a5568',
-            'bg_hover': '#5a6578',
-            'text_primary': '#e2e8f0',
-            'text_secondary': '#cbd5e0',
-            'text_muted': '#a0aec0',
-            'border': '#4a5568',
-            'border_light': '#5a6578',
-            'highlight': '#81e6d9',
-            'highlight_bg': '#234e52',
-            'error': '#fc8181',
-            'error_bg': '#742a2a',
-            'success': '#68d391',
-            'success_bg': '#22543d',
-            'progress': '#81e6d9',
-            'key_bg': '#4a5568',
-            'key_highlight': '#81e6d9',
-            'key_highlight_bg': '#234e52',
-            'key_shift': '#f6ad55',
-            'key_shift_bg': '#7c2d12',
+            'bg_main': '#f7fafc',
+            'bg_container': '#ffffff',
+            'bg_card': '#edf2f7',
+            'bg_input': '#ffffff',
+            'bg_hover': '#e2e8f0',
+            'text_primary': '#2d3748',
+            'text_secondary': '#4a5568',
+            'text_muted': '#718096',
+            'border': '#cbd5e0',
+            'border_light': '#e2e8f0',
+            'highlight': '#3182ce',
+            'highlight_bg': '#bee3f8',
+            'error': '#e53e3e',
+            'error_bg': '#fed7d7',
+            'success': '#38a169',
+            'success_bg': '#c6f6d5',
+            'progress': '#3182ce',
+            'key_bg': '#edf2f7',
+            'key_highlight': '#3182ce',
+            'key_highlight_bg': '#bee3f8',
+            'key_shift': '#ed8936',
+            'key_shift_bg': '#feebc8',
         }
+
+    def _calculate_keyboard_dimensions(self) -> tuple[float, int, int]:
+        """Calculate keyboard aspect ratio and optimal size based on screen size.
+        
+        Uses optimal dimensions from 1920x1200 screen (1402x424) as reference
+        and scales proportionally for other screen sizes.
+        
+        Returns:
+            tuple: (aspect_ratio, min_width, min_height)
+        """
+        screen = QGuiApplication.primaryScreen()
+        
+        # Reference dimensions from 1920x1200 screen that looked good
+        reference_screen_width = 1920
+        reference_keyboard_width = 1402
+        reference_keyboard_height = 424
+        reference_ratio = reference_keyboard_width / reference_keyboard_height  # ≈ 3.31
+        
+        if screen is None:
+            # Fallback to default dimensions if screen is not available
+            return (reference_ratio, 980, int(980 / reference_ratio))
+        
+        screen_width = screen.availableGeometry().width()
+        
+        # Calculate scale factor based on screen width
+        # Use screen width as primary dimension for scaling
+        scale_factor = screen_width / reference_screen_width
+        
+        # Calculate keyboard dimensions for current screen
+        # Ensure minimum size but scale up for larger screens
+        min_width = max(980, int(reference_keyboard_width * scale_factor))
+        min_height = int(min_width / reference_ratio)
+        
+        return (reference_ratio, min_width, min_height)
 
     def _build_ui(self) -> None:
         self.setWindowTitle("எழுத்தாளி - தமிழ்99 பயிற்சி")
@@ -289,7 +387,7 @@ class MainWindow(QMainWindow):
             padding: 24px 28px;
             font-size: 26px;
             font-weight: 400;
-            font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
+            font-family: '{self._marutham_font_family}', sans-serif;
             min-height: 100px;
         """)
         self.task_display.setMinimumHeight(100)
@@ -320,7 +418,7 @@ class MainWindow(QMainWindow):
                 padding: 24px 28px;
                 font-size: 26px;
                 font-weight: 400;
-                font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
+                font-family: '{self._marutham_font_family}', sans-serif;
             }}
             QLineEdit:focus {{
                 border: 2px solid {colors['highlight']};
@@ -372,40 +470,55 @@ class MainWindow(QMainWindow):
         top_row.addLayout(right_panel, 3)
         layout.addLayout(top_row)
 
-        # Bottom row: Hand image on left, Keyboard on right
+        # Parent layout for Finger UI and Keyboard
         bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(20)
+        bottom_row.setSpacing(0)  # No spacing - use all available space
+        bottom_row.setContentsMargins(0, 0, 0, 0)  # Screen padding on left and right
         
-        # Hand image on the left
+        # Finger UI on the left
         hands_image_path = Path(__file__).parent.parent / "assets" / "hands.png"
         if hands_image_path.exists():
             hands_image_label = QLabel()
             pixmap = QPixmap(str(hands_image_path))
+            
             # Scale image to fit width while maintaining aspect ratio
-            max_width = 400
-            if pixmap.width() > max_width:
-                pixmap = pixmap.scaledToWidth(max_width, Qt.SmoothTransformation)
+            max_content_width = 600
+            if pixmap.width() > max_content_width:
+                pixmap = pixmap.scaledToWidth(max_content_width, Qt.SmoothTransformation)
+            
             hands_image_label.setPixmap(pixmap)
             hands_image_label.setAlignment(Qt.AlignCenter)
             hands_image_label.setStyleSheet(f"""
                 background: {colors['bg_container']};
                 border-radius: 12px;
-                padding: 12px;
+                padding: 12px 20px;
             """)
-            hands_image_label.setMinimumWidth(400)
-            hands_image_label.setMaximumWidth(450)
-            bottom_row.addWidget(hands_image_label, 1)
+            # Set size constraints
+            padding_horizontal = 40  # 20px on each side
+            min_content_width = max(500, pixmap.width() + padding_horizontal)
+            hands_image_label.setMinimumWidth(min_content_width)
+            hands_image_label.setMaximumWidth(650)
+            padding_vertical = 24  # 12px on each side
+            hands_image_label.setMinimumHeight(pixmap.height() + padding_vertical)
+            hands_image_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+            bottom_row.addWidget(hands_image_label, 1)  # Stretch factor 1
         
         # Keyboard on the right
-        keyboard_container = self._build_keyboard()
-        keyboard_container.setMinimumSize(980, 400)
-        keyboard_container.setStyleSheet(f"""
+        keyboard_widget = self._build_keyboard()
+        
+        # Calculate keyboard dimensions dynamically based on screen size
+        aspect_ratio, min_width, min_height = self._calculate_keyboard_dimensions()
+        
+        keyboard_widget.setStyleSheet(f"""
             background: {colors['bg_container']};
             border: none;
             border-radius: 16px;
             padding: 20px;
         """)
-        bottom_row.addWidget(keyboard_container, 3)
+        
+        keyboard_widget.setMinimumSize(min_width, min_height)
+        keyboard_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        bottom_row.addWidget(keyboard_widget, 2)  # Stretch factor 2 (keyboard gets more space)
         
         layout.addLayout(bottom_row)
         
@@ -865,9 +978,22 @@ class MainWindow(QMainWindow):
         container = QWidget()
         grid = QGridLayout(container)
         grid.setSpacing(8)
-        container.setStyleSheet("background: #2d3748; border-radius: 12px; padding: 16px;")
+        # Set padding to match outer container padding for proper spacing
+        container.setStyleSheet("background: #ffffff; border-radius: 12px; padding: 0px;")
 
         colors = self._get_theme_colors()
+        
+        # Calculate base font size based on screen/keyboard size
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            screen_width = screen.availableGeometry().width()
+            # Reference: 1920px screen = 18px base font
+            # Scale font proportionally with screen width
+            font_scale = screen_width / 1920.0
+            base_font_size = max(14, int(18 * font_scale))
+        else:
+            base_font_size = 18
+        
         key_style = f"""
             QLabel {{
                 background: {colors['key_bg']};
@@ -875,8 +1001,8 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-radius: 6px;
                 padding: 12px 8px;
-                font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
-                font-size: 18px;
+                font-family: '{self._marutham_font_family}', sans-serif;
+                font-size: {base_font_size}px;
                 font-weight: 400;
             }}
         """
@@ -902,6 +1028,7 @@ class MainWindow(QMainWindow):
 
         unit_pixels = 12
         unit_scale = 4
+        base_key_height = 44
         special_labels = {
             "Backspace": "←",
             "Tab": "Tab",
@@ -912,6 +1039,23 @@ class MainWindow(QMainWindow):
             "Alt": "Alt",
             "Space": "Space",
         }
+
+        # Calculate font sizes based on the base font size (which scales with screen)
+        # These ratios maintain good readability at different sizes
+        tamil_base_font = base_font_size  # Main Tamil character
+        english_font = max(8, int(base_font_size * 0.75))  # English label (top-left)
+        tamil_shift_font = max(10, int(base_font_size * 0.75))  # Tamil shift (top-right)
+        special_font = max(10, int(base_font_size * 0.78))  # Special keys
+
+        # Use percentage-based spacing for consistent appearance across all key sizes
+        # The middle column will take 15% of the table width, ensuring uniform spacing
+        label_spacing_percent = 100
+
+        logging.info(f"Base font size: {base_font_size}")
+        logging.info(f"English font: {english_font}")
+        logging.info(f"Tamil base font: {tamil_base_font}")
+        logging.info(f"Tamil shift font: {tamil_shift_font}")
+        logging.info(f"Special font: {special_font}")
 
         for row_index, row in enumerate(rows):
             col = 0
@@ -924,28 +1068,45 @@ class MainWindow(QMainWindow):
                 label = QLabel()
                 label.setAlignment(Qt.AlignCenter)
                 label.setTextFormat(Qt.RichText)
+                
+                # Calculate key dimensions
+                key_width = int(unit_pixels * size * unit_scale)
+                key_height = base_key_height
+                
+                # Log each key size
+                logging.info(f"Key: {key}, Size: {size}, Width: {key_width}px, Height: {key_height}px")
+                
                 label.setStyleSheet(key_style)
-                label.setMinimumHeight(44)
-                label.setMinimumWidth(int(unit_pixels * size * unit_scale))
+                label.setMinimumHeight(key_height)
+                label.setMinimumWidth(key_width)
                 colors = self._get_theme_colors()
                 if key in special_labels:
                     label.setText(html.escape(special_labels[key]))
-                    label.setStyleSheet(key_style + f"QLabel {{ font-size: 14px; color: {colors['text_muted']}; }}")
+                    label.setStyleSheet(key_style + f"QLabel {{ font-family: '{self._marutham_font_family}', sans-serif; font-size: {special_font}px; color: {colors['text_muted']}; }}")
                 else:
                     english = html.escape(key)
                     tamil_base = html.escape(display[0]) if display[0] else ""
                     tamil_shift = html.escape(display[1]) if display[1] else ""
                     label.setText(
-                        '<table style="width:100%; height:100%; border-collapse:collapse;">'
-                        "<tr>"
-                        f'<td style="font-size:10px; color:{colors["text_muted"]}; vertical-align:top; text-align:left;">{english}</td>'
-                        '<td style="width:6px;"></td>'
-                        f'<td style="font-size:12px; color:{colors["text_muted"]}; vertical-align:top; text-align:right;">{tamil_shift}</td>'
-                        "</tr>"
-                        "<tr>"
-                        f'<td style="font-size:18px; font-weight:600; vertical-align:bottom; text-align:center;">{tamil_base}</td>'
-                        "</tr>"
-                        "</table>"
+                        '<table width="100%" height="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+                            '<tr>'
+                                f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
+                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                                f'font-size:{english_font}px; color:{colors["text_muted"]}; ">{english}</td>'
+
+                                '<td style="width:5px;"></td>'
+
+                                f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
+                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                                f'font-size:{tamil_shift_font}px; color:{colors["text_muted"]}; ">{tamil_shift}</td>'
+                            '</tr>'
+
+                            '<tr>'
+                                f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
+                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                                f'font-size:{tamil_base_font}px; font-weight:600; ">{tamil_base}</td>'
+                            '</tr>'
+                        '</table>'
                     )
 
                 grid.addWidget(label, row_index, col, 1, span)
@@ -961,7 +1122,11 @@ class MainWindow(QMainWindow):
         max_columns = max(sum(int(size * unit_scale) for _, size in row) for row in rows)
         for column in range(max_columns):
             grid.setColumnMinimumWidth(column, unit_pixels)
-            grid.setColumnStretch(column, 1)
+            # Don't stretch columns - use natural width to prevent cropping
+            grid.setColumnStretch(column, 0)
+        
+        # Ensure the grid layout has proper margins to prevent cropping
+        grid.setContentsMargins(0, 0, 0, 0)
 
         return container
 
@@ -975,7 +1140,7 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: '{self._marutham_font_family}', sans-serif;
                     font-size: 18px;
                     font-weight: 400;
                 }}
@@ -992,7 +1157,7 @@ class MainWindow(QMainWindow):
                     border: 2px solid {colors['key_shift']};
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: '{self._marutham_font_family}', sans-serif;
                     font-size: 18px;
                     font-weight: 500;
                 }}
@@ -1005,7 +1170,7 @@ class MainWindow(QMainWindow):
                     border: 2px solid {colors['key_highlight']};
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: '{self._marutham_font_family}', sans-serif;
                     font-size: 18px;
                     font-weight: 500;
                 }}
@@ -1043,7 +1208,7 @@ class MainWindow(QMainWindow):
                         border: 2px solid {colors['success']};
                         border-radius: 6px;
                         padding: 12px 8px;
-                        font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                        font-family: '{self._marutham_font_family}', sans-serif;
                         font-size: 18px;
                         font-weight: 500;
                     }}
@@ -1315,7 +1480,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
+                    font-family: '{self._marutham_font_family}', sans-serif;
                 }}
             """)
         else:
@@ -1328,7 +1493,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: 'TAU-Marutham', 'Noto Sans Tamil', 'Latha', sans-serif;
+                    font-family: '{self._marutham_font_family}', sans-serif;
                 }}
                 QLineEdit:focus {{
                     border: 2px solid {colors['highlight']};
@@ -1344,11 +1509,11 @@ class MainWindow(QMainWindow):
         task_size = max(16.0, height * 0.035)
         input_size = max(15.0, height * 0.03)
 
-        task_font = QFont("Sans Serif")
+        task_font = QFont(self._marutham_font_family)
         task_font.setPointSizeF(task_size)
         self.task_display.setFont(task_font)
 
-        input_font = QFont("Sans Serif")
+        input_font = QFont(self._marutham_font_family)
         input_font.setPointSizeF(input_size)
         self.input_box.setFont(input_font)
 
