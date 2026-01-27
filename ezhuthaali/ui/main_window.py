@@ -470,10 +470,16 @@ class MainWindow(QMainWindow):
         top_row.addLayout(right_panel, 3)
         layout.addLayout(top_row)
 
-        # Parent layout for Finger UI and Keyboard
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(0)  # No spacing - use all available space
-        bottom_row.setContentsMargins(0, 0, 0, 0)  # Screen padding on left and right
+        # Single parent container for Finger UI and Keyboard
+        bottom_container = QWidget()
+        bottom_container.setStyleSheet(f"""
+            background: {colors['bg_container']};
+            border-radius: 16px;
+            padding: 20px;
+        """)
+        bottom_row = QHBoxLayout(bottom_container)
+        bottom_row.setSpacing(15)  # Small spacing between finger UI and keyboard
+        bottom_row.setContentsMargins(0, 0, 0, 0)
         
         # Finger UI on the left
         hands_image_path = Path(__file__).parent.parent / "assets" / "hands.png"
@@ -488,18 +494,13 @@ class MainWindow(QMainWindow):
             
             hands_image_label.setPixmap(pixmap)
             hands_image_label.setAlignment(Qt.AlignCenter)
-            hands_image_label.setStyleSheet(f"""
-                background: {colors['bg_container']};
-                border-radius: 12px;
-                padding: 12px 20px;
-            """)
+            # Remove background - parent container provides it
+            hands_image_label.setStyleSheet("background: transparent; padding: 0px;")
             # Set size constraints
-            padding_horizontal = 40  # 20px on each side
-            min_content_width = max(500, pixmap.width() + padding_horizontal)
+            min_content_width = max(500, pixmap.width())
             hands_image_label.setMinimumWidth(min_content_width)
             hands_image_label.setMaximumWidth(650)
-            padding_vertical = 24  # 12px on each side
-            hands_image_label.setMinimumHeight(pixmap.height() + padding_vertical)
+            hands_image_label.setMinimumHeight(pixmap.height())
             hands_image_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             bottom_row.addWidget(hands_image_label, 1)  # Stretch factor 1
         
@@ -509,18 +510,14 @@ class MainWindow(QMainWindow):
         # Calculate keyboard dimensions dynamically based on screen size
         aspect_ratio, min_width, min_height = self._calculate_keyboard_dimensions()
         
-        keyboard_widget.setStyleSheet(f"""
-            background: {colors['bg_container']};
-            border: none;
-            border-radius: 16px;
-            padding: 20px;
-        """)
+        # Remove background - parent container provides it
+        keyboard_widget.setStyleSheet("background: transparent; border: none; padding: 0px;")
         
         keyboard_widget.setMinimumSize(min_width, min_height)
         keyboard_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         bottom_row.addWidget(keyboard_widget, 2)  # Stretch factor 2 (keyboard gets more space)
         
-        layout.addLayout(bottom_row)
+        layout.addWidget(bottom_container)
         
         self.setCentralWidget(root)
 
@@ -1073,8 +1070,6 @@ class MainWindow(QMainWindow):
                 key_width = int(unit_pixels * size * unit_scale)
                 key_height = base_key_height
                 
-                # Log each key size
-                logging.info(f"Key: {key}, Size: {size}, Width: {key_width}px, Height: {key_height}px")
                 
                 label.setStyleSheet(key_style)
                 label.setMinimumHeight(key_height)
