@@ -18,10 +18,13 @@ A Tamil99 typing practice application built with Python + PySide6. Designed as a
 - **Progress Saving**: User progress is automatically saved (`~/.ezhuthaali/progress.json`)
 
 ### 🎨 User Interface
-- **Dark Mode**: Modern dark theme
+- **Light Theme**: Modern, clean light theme
 - **Responsive Design**: Screen size-based font scaling
+- **Adaptive Layout**: Keyboard and finger UI automatically adjust to window size, preventing cropping
 - **Keyboard Display**: On-screen keyboard display with next key highlighting
+- **Finger Guidance**: Visual finger placement guide showing which finger to use for each key
 - **Word-by-Word Scrolling**: Scrolling word-by-word for long lines
+- **Dynamic Resizing**: Layout adapts in real-time when window is resized
 
 ## Installation
 
@@ -93,6 +96,9 @@ This application uses the Tamil99 keyboard layout. All key mappings are embedded
 - **Guidance**: The next key is highlighted on the keyboard
 - **Shift Key Highlighting**: Highlighted when Shift is required
 - **Multi-Keystroke Sequences**: Proper guidance for characters requiring multiple keystrokes (e.g., கா = h+q)
+- **Adaptive Sizing**: Keyboard scales dynamically to fit available screen space
+- **Font Scaling**: Keyboard fonts automatically adjust based on available width
+- **No Cropping**: Layout prevents right-side cropping on smaller screens
 
 ## Development
 
