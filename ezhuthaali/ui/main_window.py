@@ -1070,6 +1070,8 @@ class MainWindow(QMainWindow):
                 key_width = int(unit_pixels * size * unit_scale)
                 key_height = base_key_height
                 
+                # Log each key size
+                logging.info(f"Key: {key}, Size: {size}, Width: {key_width}px, Height: {key_height}px")
                 
                 label.setStyleSheet(key_style)
                 label.setMinimumHeight(key_height)
