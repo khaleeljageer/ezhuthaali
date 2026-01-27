@@ -121,6 +121,10 @@ class MainWindow(QMainWindow):
         self._original_hands_pixmap: Optional[QPixmap] = None
         self._bottom_container: Optional[QWidget] = None
         self._keyboard_font_sizes: dict[str, int] = {}  # Store current font sizes
+        self._finger_guidance_label: Optional[QLabel] = None
+        
+        # Finger mapping for QWERTY/Tamil99 layout
+        self._key_to_finger = self._build_finger_mapping()
 
         # Load Marutham font from assets
         self._load_marutham_font()
@@ -146,6 +150,109 @@ class MainWindow(QMainWindow):
         else:
             self._marutham_font_family = "TAU-Marutham"
             logging.warning(f"Marutham font not found at {font_path}")
+    
+    def _build_finger_mapping(self) -> dict[str, tuple[str, str]]:
+        """Build mapping from key to (hand, finger) tuple.
+        
+        Returns:
+            dict mapping key name to (hand, finger) where:
+            - hand: 'left' or 'right'
+            - finger: 'thumb', 'index', 'middle', 'ring', 'pinky'
+        """
+        mapping = {}
+        
+        # Left hand - Pinky
+        for key in ['`', '1', 'Q', 'A', 'Z', 'TAB', 'CAPS']:
+            mapping[key.upper()] = ('left', 'pinky')
+        mapping['SHIFT'] = ('left', 'pinky')  # Left shift (default, can be overridden)
+        
+        # Left hand - Ring
+        for key in ['2', 'W', 'S', 'X']:
+            mapping[key.upper()] = ('left', 'ring')
+        
+        # Left hand - Middle
+        for key in ['3', 'E', 'D', 'C']:
+            mapping[key.upper()] = ('left', 'middle')
+        
+        # Left hand - Index
+        for key in ['4', '5', 'R', 'T', 'F', 'G', 'V', 'B']:
+            mapping[key.upper()] = ('left', 'index')
+        
+        # Left hand - Thumb (Space bar left side)
+        mapping['SPACE'] = ('left', 'thumb')
+        mapping[' '] = ('left', 'thumb')  # Space as character
+        
+        # Right hand - Index
+        for key in ['6', '7', 'Y', 'U', 'H', 'J', 'N', 'M']:
+            mapping[key.upper()] = ('right', 'index')
+        
+        # Right hand - Middle
+        for key in ['8', 'I', 'K', ',']:
+            mapping[key.upper()] = ('right', 'middle')
+        
+        # Right hand - Ring
+        for key in ['9', 'O', 'L', '.']:
+            mapping[key.upper()] = ('right', 'ring')
+        
+        # Right hand - Pinky
+        for key in ['0', '-', '=', 'P', '[', ']', '\\', ';', "'", '/', 'ENTER', 'BACKSPACE']:
+            mapping[key.upper()] = ('right', 'pinky')
+        
+        # Special keys - Right shift (typically used more often)
+        mapping['SHIFT'] = ('right', 'pinky')  # Right shift is more common
+        
+        # Special keys
+        mapping['CTRL'] = ('left', 'pinky')  # Left Ctrl
+        mapping['ALT'] = ('left', 'thumb')  # Left Alt
+        
+        # Handle numeric row and symbols
+        # These follow the same pattern as letters above them
+        
+        return mapping
+    
+    def _get_finger_name(self, key_label: str, needs_shift: bool = False) -> tuple[str, str]:
+        """Get finger name for a key in both English and Tamil.
+        
+        Args:
+            key_label: The key label (e.g., 'A', 'Space', 'Shift')
+            needs_shift: Whether Shift is required
+            
+        Returns:
+            tuple of (english_name, tamil_name)
+        """
+        # Handle Shift key separately
+        if key_label.upper() == 'SHIFT':
+            # If it's the Shift key itself, determine which shift based on context
+            # For now, default to right shift (pinky)
+            hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
+        elif needs_shift:
+            # If shift is needed, use right shift (pinky) for the shift key
+            # But also get the finger for the actual key being pressed
+            # For shift combinations, typically use right shift
+            hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
+        else:
+            # Regular key - get finger mapping
+            hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+        
+        # Tamil finger names
+        finger_names_tamil = {
+            'thumb': 'கட்டைவிரல்',
+            'index': 'சுட்டுவிரல்',
+            'middle': 'நடுவிரல்',
+            'ring': 'மோதிரவிரல்',
+            'pinky': 'சிறுவிரல்'
+        }
+        
+        # Tamil hand names
+        hand_names_tamil = {
+            'left': 'இடது',
+            'right': 'வலது'
+        }
+        
+        english_name = f"{hand.capitalize()} {finger.capitalize()}"
+        tamil_name = f"{hand_names_tamil.get(hand, hand)} {finger_names_tamil.get(finger, finger)}"
+        
+        return (english_name, tamil_name)
 
     def _get_theme_colors(self) -> dict:
         """Get light theme color palette"""
@@ -488,7 +595,33 @@ class MainWindow(QMainWindow):
         bottom_row.setSpacing(15)  # Small spacing between finger UI and keyboard
         bottom_row.setContentsMargins(0, 0, 0, 0)
         
-        # Finger UI on the left
+        # Finger UI container on the left
+        finger_ui_container = QWidget()
+        finger_ui_layout = QVBoxLayout(finger_ui_container)
+        finger_ui_layout.setSpacing(10)
+        finger_ui_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Finger guidance label
+        self._finger_guidance_label = QLabel("")
+        self._finger_guidance_label.setAlignment(Qt.AlignCenter)
+        self._finger_guidance_label.setWordWrap(True)
+        self._finger_guidance_label.setTextFormat(Qt.RichText)
+        self._finger_guidance_label.setStyleSheet(f"""
+            QLabel {{
+                background: {colors['bg_card']};
+                color: {colors['text_primary']};
+                border-radius: 10px;
+                padding: 12px 16px;
+                font-size: 16px;
+                font-weight: 600;
+                font-family: '{self._marutham_font_family}', sans-serif;
+                min-height: 50px;
+            }}
+        """)
+        self._finger_guidance_label.setVisible(False)  # Hidden until session starts
+        finger_ui_layout.addWidget(self._finger_guidance_label)
+        
+        # Hands image
         hands_image_path = Path(__file__).parent.parent / "assets" / "hands.png"
         if hands_image_path.exists():
             self._hands_image_label = QLabel()
@@ -508,7 +641,9 @@ class MainWindow(QMainWindow):
             self._hands_image_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             self._hands_image_label.setMinimumWidth(200)  # Minimum to prevent too small
             self._hands_image_label.setMinimumHeight(100)  # Minimum height
-            bottom_row.addWidget(self._hands_image_label, 1)  # Stretch factor 1
+            finger_ui_layout.addWidget(self._hands_image_label)
+        
+        bottom_row.addWidget(finger_ui_container, 1)  # Stretch factor 1
         
         # Keyboard on the right
         self._keyboard_widget = self._build_keyboard()
@@ -1379,6 +1514,9 @@ class MainWindow(QMainWindow):
     def _update_keyboard_hint(self) -> None:
         if not self._session:
             self._clear_keyboard_highlight()
+            if self._finger_guidance_label:
+                self._finger_guidance_label.setText("")
+                self._finger_guidance_label.setVisible(False)
             return
 
         if self._keystroke_index < len(self._keystroke_sequence):
@@ -1393,6 +1531,17 @@ class MainWindow(QMainWindow):
             if needs_shift:
                 for shift_label in self._shift_labels:
                     self._highlight_key(shift_label, key_label="Shift", is_shift=True)
+            
+            # Update finger guidance label
+            if self._finger_guidance_label:
+                english_finger, tamil_finger = self._get_finger_name(key_label, needs_shift)
+                # Format: "Use Left Thumb / இடது கட்டைவிரல்"
+                if needs_shift:
+                    guidance_text = f"<div style='text-align: center;'>Hold Shift<br/>{english_finger}<br/>{tamil_finger}</div>"
+                else:
+                    guidance_text = f"<div style='text-align: center;'>Use {english_finger}<br/>{tamil_finger}</div>"
+                self._finger_guidance_label.setText(guidance_text)
+                self._finger_guidance_label.setVisible(True)
         else:
             # Task is complete - highlight space bar to indicate user should press space for next task
             self._clear_keyboard_highlight()
@@ -1412,6 +1561,13 @@ class MainWindow(QMainWindow):
                     }}
                 """)
                 self._highlighted_keys.append(space_label)
+            
+            # Update finger guidance for space bar
+            if self._finger_guidance_label:
+                english_finger, tamil_finger = self._get_finger_name("Space", False)
+                guidance_text = f"Press Space to continue<br/>Use {english_finger}<br/>{tamil_finger}"
+                self._finger_guidance_label.setText(guidance_text)
+                self._finger_guidance_label.setVisible(True)
     
     def _build_keystroke_sequence(self, text: str) -> list[tuple[str, bool]]:
         """Build the keystroke sequence for Tamil99 text."""
