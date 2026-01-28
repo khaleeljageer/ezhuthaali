@@ -5,12 +5,12 @@ import html
 import re
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QShortcut, QKeyEvent
-from PySide6.QtCore import QObject
+from PySide6.QtCore import Qt, QTimer, QObject, QSize
+from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap, QGuiApplication, QFontDatabase
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QSizePolicy,
     QStyle,
     QVBoxLayout,
     QWidget,
@@ -38,6 +39,47 @@ class LevelState:
     level: Level
     unlocked: bool
     completed: int
+
+
+class AspectRatioWidget(QWidget):
+    """Widget that maintains a fixed aspect ratio"""
+    def __init__(self, aspect_ratio: float = 2.45, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._aspect_ratio = aspect_ratio
+        # Use Expanding policy for both to allow proper scaling
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    
+    def setAspectRatio(self, aspect_ratio: float) -> None:
+        """Set the aspect ratio (width/height)"""
+        self._aspect_ratio = aspect_ratio
+        self.updateGeometry()
+    
+    def hasHeightForWidth(self) -> bool:
+        """Return True to indicate this widget has height-for-width behavior"""
+        return True
+    
+    def heightForWidth(self, width: int) -> int:
+        """Return the height that maintains aspect ratio for given width"""
+        if width > 0:
+            return int(width / self._aspect_ratio)
+        return 400
+    
+    def sizeHint(self) -> QSize:
+        """Return a size hint that maintains aspect ratio"""
+        # Default size based on aspect ratio
+        width = 980
+        height = int(width / self._aspect_ratio)
+        return QSize(width, height)
+    
+    def minimumSizeHint(self) -> QSize:
+        """Return minimum size hint"""
+        return QSize(980, int(980 / self._aspect_ratio))
+    
+    def resizeEvent(self, event) -> None:
+        """Override resize to maintain aspect ratio when layout doesn't respect heightForWidth"""
+        # Don't constrain height - let the layout handle it via heightForWidth
+        # This allows the keyboard to expand and show all text properly
+        super().resizeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -72,37 +114,206 @@ class MainWindow(QMainWindow):
         self._char_to_keystroke_map: dict[int, int] = {}  # char_index -> keystroke_index
         self._typed_keystrokes: list[str] = []  # Track actual keys pressed
         self._typed_tamil_text: str = ""  # Track typed Tamil text
+        
+        # Store references for adaptive layout
+        self._keyboard_widget: Optional[QWidget] = None
+        self._hands_image_label: Optional[QLabel] = None
+        self._original_hands_pixmap: Optional[QPixmap] = None
+        self._bottom_container: Optional[QWidget] = None
+        self._keyboard_font_sizes: dict[str, int] = {}  # Store current font sizes
+        self._finger_guidance_label: Optional[QLabel] = None
+        
+        # Finger mapping for QWERTY/Tamil99 layout
+        self._key_to_finger = self._build_finger_mapping()
+
+        # Load Marutham font from assets
+        self._load_marutham_font()
 
         self._build_ui()
         self._refresh_levels_list()
         QTimer.singleShot(0, self.showMaximized)
 
-    def _get_theme_colors(self) -> dict:
-        """Get dark theme color palette"""
-        return {
-            'bg_main': '#1a202c',
-            'bg_container': '#2d3748',
-            'bg_card': '#4a5568',
-            'bg_input': '#4a5568',
-            'bg_hover': '#5a6578',
-            'text_primary': '#e2e8f0',
-            'text_secondary': '#cbd5e0',
-            'text_muted': '#a0aec0',
-            'border': '#4a5568',
-            'border_light': '#5a6578',
-            'highlight': '#81e6d9',
-            'highlight_bg': '#234e52',
-            'error': '#fc8181',
-            'error_bg': '#742a2a',
-            'success': '#68d391',
-            'success_bg': '#22543d',
-            'progress': '#81e6d9',
-            'key_bg': '#4a5568',
-            'key_highlight': '#81e6d9',
-            'key_highlight_bg': '#234e52',
-            'key_shift': '#f6ad55',
-            'key_shift_bg': '#7c2d12',
+    def _load_marutham_font(self) -> None:
+        """Load Marutham font from assets"""
+        font_path = Path(__file__).parent.parent / "assets" / "TAU-Marutham.ttf"
+        if font_path.exists():
+            font_id = QFontDatabase.addApplicationFont(str(font_path))
+            if font_id != -1:
+                font_families = QFontDatabase.applicationFontFamilies(font_id)
+                if font_families:
+                    self._marutham_font_family = font_families[0]
+                    logging.info(f"Loaded Marutham font: {self._marutham_font_family}")
+                else:
+                    self._marutham_font_family = "TAU-Marutham"
+            else:
+                self._marutham_font_family = "TAU-Marutham"
+        else:
+            self._marutham_font_family = "TAU-Marutham"
+            logging.warning(f"Marutham font not found at {font_path}")
+    
+    def _build_finger_mapping(self) -> dict[str, tuple[str, str]]:
+        """Build mapping from key to (hand, finger) tuple.
+        
+        Returns:
+            dict mapping key name to (hand, finger) where:
+            - hand: 'left' or 'right'
+            - finger: 'thumb', 'index', 'middle', 'ring', 'pinky'
+        """
+        mapping = {}
+        
+        # Left hand - Pinky
+        for key in ['`', '1', 'Q', 'A', 'Z', 'TAB', 'CAPS']:
+            mapping[key.upper()] = ('left', 'pinky')
+        mapping['SHIFT'] = ('left', 'pinky')  # Left shift (default, can be overridden)
+        
+        # Left hand - Ring
+        for key in ['2', 'W', 'S', 'X']:
+            mapping[key.upper()] = ('left', 'ring')
+        
+        # Left hand - Middle
+        for key in ['3', 'E', 'D', 'C']:
+            mapping[key.upper()] = ('left', 'middle')
+        
+        # Left hand - Index
+        for key in ['4', '5', 'R', 'T', 'F', 'G', 'V', 'B']:
+            mapping[key.upper()] = ('left', 'index')
+        
+        # Left hand - Thumb (Space bar left side)
+        mapping['SPACE'] = ('left', 'thumb')
+        mapping[' '] = ('left', 'thumb')  # Space as character
+        
+        # Right hand - Index
+        for key in ['6', '7', 'Y', 'U', 'H', 'J', 'N', 'M']:
+            mapping[key.upper()] = ('right', 'index')
+        
+        # Right hand - Middle
+        for key in ['8', 'I', 'K', ',']:
+            mapping[key.upper()] = ('right', 'middle')
+        
+        # Right hand - Ring
+        for key in ['9', 'O', 'L', '.']:
+            mapping[key.upper()] = ('right', 'ring')
+        
+        # Right hand - Pinky
+        for key in ['0', '-', '=', 'P', '[', ']', '\\', ';', "'", '/', 'ENTER', 'BACKSPACE']:
+            mapping[key.upper()] = ('right', 'pinky')
+        
+        # Special keys - Right shift (typically used more often)
+        mapping['SHIFT'] = ('right', 'pinky')  # Right shift is more common
+        
+        # Special keys
+        mapping['CTRL'] = ('left', 'pinky')  # Left Ctrl
+        mapping['ALT'] = ('left', 'thumb')  # Left Alt
+        
+        # Handle numeric row and symbols
+        # These follow the same pattern as letters above them
+        
+        return mapping
+    
+    def _get_finger_name(self, key_label: str, needs_shift: bool = False) -> tuple[str, str]:
+        """Get finger name for a key in both English and Tamil.
+        
+        Args:
+            key_label: The key label (e.g., 'A', 'Space', 'Shift')
+            needs_shift: Whether Shift is required
+            
+        Returns:
+            tuple of (english_name, tamil_name)
+        """
+        # Handle Shift key separately
+        if key_label.upper() == 'SHIFT':
+            # If it's the Shift key itself, determine which shift based on context
+            # For now, default to right shift (pinky)
+            hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
+        elif needs_shift:
+            # If shift is needed, use right shift (pinky) for the shift key
+            # But also get the finger for the actual key being pressed
+            # For shift combinations, typically use right shift
+            hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
+        else:
+            # Regular key - get finger mapping
+            hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+        
+        # Tamil finger names
+        finger_names_tamil = {
+            'thumb': 'கட்டைவிரல்',
+            'index': 'சுட்டுவிரல்',
+            'middle': 'நடுவிரல்',
+            'ring': 'மோதிரவிரல்',
+            'pinky': 'சிறுவிரல்'
         }
+        
+        # Tamil hand names
+        hand_names_tamil = {
+            'left': 'இடது',
+            'right': 'வலது'
+        }
+        
+        english_name = f"{hand.capitalize()} {finger.capitalize()}"
+        tamil_name = f"{hand_names_tamil.get(hand, hand)} {finger_names_tamil.get(finger, finger)}"
+        
+        return (english_name, tamil_name)
+
+    def _get_theme_colors(self) -> dict:
+        """Get light theme color palette"""
+        return {
+            'bg_main': '#f7fafc',
+            'bg_container': '#ffffff',
+            'bg_card': '#edf2f7',
+            'bg_input': '#ffffff',
+            'bg_hover': '#e2e8f0',
+            'text_primary': '#2d3748',
+            'text_secondary': '#4a5568',
+            'text_muted': '#718096',
+            'border': '#cbd5e0',
+            'border_light': '#e2e8f0',
+            'highlight': '#3182ce',
+            'highlight_bg': '#bee3f8',
+            'error': '#e53e3e',
+            'error_bg': '#fed7d7',
+            'success': '#38a169',
+            'success_bg': '#c6f6d5',
+            'progress': '#3182ce',
+            'key_bg': '#edf2f7',
+            'key_highlight': '#3182ce',
+            'key_highlight_bg': '#bee3f8',
+            'key_shift': '#ed8936',
+            'key_shift_bg': '#feebc8',
+        }
+
+    def _calculate_keyboard_dimensions(self) -> tuple[float, int, int]:
+        """Calculate keyboard aspect ratio and optimal size based on screen size.
+        
+        Uses optimal dimensions from 1920x1200 screen (1402x424) as reference
+        and scales proportionally for other screen sizes.
+        
+        Returns:
+            tuple: (aspect_ratio, min_width, min_height)
+        """
+        screen = QGuiApplication.primaryScreen()
+        
+        # Reference dimensions from 1920x1200 screen that looked good
+        reference_screen_width = 1920
+        reference_keyboard_width = 1402
+        reference_keyboard_height = 424
+        reference_ratio = reference_keyboard_width / reference_keyboard_height  # ≈ 3.31
+        
+        if screen is None:
+            # Fallback to default dimensions if screen is not available
+            return (reference_ratio, 980, int(980 / reference_ratio))
+        
+        screen_width = screen.availableGeometry().width()
+        
+        # Calculate scale factor based on screen width
+        # Use screen width as primary dimension for scaling
+        scale_factor = screen_width / reference_screen_width
+        
+        # Calculate keyboard dimensions for current screen
+        # Ensure minimum size but scale up for larger screens
+        min_width = max(980, int(reference_keyboard_width * scale_factor))
+        min_height = int(min_width / reference_ratio)
+        
+        return (reference_ratio, min_width, min_height)
 
     def _build_ui(self) -> None:
         self.setWindowTitle("எழுத்தாளி - தமிழ்99 பயிற்சி")
@@ -290,7 +501,7 @@ class MainWindow(QMainWindow):
             padding: 24px 28px;
             font-size: 26px;
             font-weight: 400;
-            font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+            font-family: '{self._marutham_font_family}', sans-serif;
             min-height: 100px;
         """)
         self.task_display.setMinimumHeight(100)
@@ -321,7 +532,7 @@ class MainWindow(QMainWindow):
                 padding: 24px 28px;
                 font-size: 26px;
                 font-weight: 400;
-                font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+                font-family: '{self._marutham_font_family}', sans-serif;
             }}
             QLineEdit:focus {{
                 border: 2px solid {colors['highlight']};
@@ -373,31 +584,86 @@ class MainWindow(QMainWindow):
         top_row.addLayout(right_panel, 3)
         layout.addLayout(top_row)
 
-        keyboard_header = QLabel("⌨️ தமிழ்99 விசைப்பலகை")
-        keyboard_header.setStyleSheet(f"""
-            font-size: 18px;
-            font-weight: 600;
-            color: {colors['text_secondary']};
-            padding: 12px 0px;
-            background: transparent;
-        """)
-        layout.addWidget(keyboard_header, alignment=Qt.AlignHCenter)
-        
-        keyboard_container = self._build_keyboard()
-        keyboard_container.setMinimumSize(980, 400)
-        keyboard_container.setStyleSheet(f"""
+        # Single parent container for Finger UI and Keyboard
+        self._bottom_container = QWidget()
+        self._bottom_container.setStyleSheet(f"""
             background: {colors['bg_container']};
-            border: none;
             border-radius: 16px;
             padding: 20px;
         """)
-        keyboard_wrapper = QWidget()
-        keyboard_layout = QHBoxLayout(keyboard_wrapper)
-        keyboard_layout.setContentsMargins(0, 0, 0, 0)
-        keyboard_layout.addStretch(1)
-        keyboard_layout.addWidget(keyboard_container)
-        keyboard_layout.addStretch(1)
-        layout.addWidget(keyboard_wrapper)
+        bottom_row = QHBoxLayout(self._bottom_container)
+        bottom_row.setSpacing(15)  # Small spacing between finger UI and keyboard
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        
+        # Finger UI container on the left
+        finger_ui_container = QWidget()
+        finger_ui_layout = QVBoxLayout(finger_ui_container)
+        finger_ui_layout.setSpacing(10)
+        finger_ui_layout.setContentsMargins(0, 0, 0, 0)
+        finger_ui_layout.setAlignment(Qt.AlignCenter)  # Center all contents
+        
+        # Finger guidance label
+        self._finger_guidance_label = QLabel("")
+        self._finger_guidance_label.setAlignment(Qt.AlignCenter)
+        self._finger_guidance_label.setWordWrap(True)
+        self._finger_guidance_label.setTextFormat(Qt.RichText)
+        self._finger_guidance_label.setStyleSheet(f"""
+            QLabel {{
+                background: {colors['bg_card']};
+                color: {colors['text_primary']};
+                border-radius: 10px;
+                padding: 12px 16px;
+                font-size: 16px;
+                font-weight: 600;
+                font-family: '{self._marutham_font_family}', sans-serif;
+                min-height: 50px;
+            }}
+        """)
+        self._finger_guidance_label.setVisible(False)  # Hidden until session starts
+        finger_ui_layout.addWidget(self._finger_guidance_label, 0, Qt.AlignCenter)
+        
+        # Hands image - centered to match text layout
+        hands_image_path = Path(__file__).parent.parent / "assets" / "hands.png"
+        if hands_image_path.exists():
+            self._hands_image_label = QLabel()
+            self._original_hands_pixmap = QPixmap(str(hands_image_path))
+            
+            # Initial scale - will be adjusted on resize
+            initial_max_width = 600
+            pixmap = self._original_hands_pixmap
+            if pixmap.width() > initial_max_width:
+                pixmap = pixmap.scaledToWidth(initial_max_width, Qt.SmoothTransformation)
+            
+            self._hands_image_label.setPixmap(pixmap)
+            self._hands_image_label.setAlignment(Qt.AlignCenter)
+            # Remove background - parent container provides it
+            self._hands_image_label.setStyleSheet("background: transparent; padding: 0px;")
+            # Use flexible size policy to allow shrinking
+            self._hands_image_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+            self._hands_image_label.setMinimumWidth(200)  # Minimum to prevent too small
+            self._hands_image_label.setMinimumHeight(100)  # Minimum height
+            # Center the hands image to align with the text layout above
+            finger_ui_layout.addWidget(self._hands_image_label, 0, Qt.AlignCenter)
+        
+        bottom_row.addWidget(finger_ui_container, 1)  # Stretch factor 1
+        
+        # Keyboard on the right
+        self._keyboard_widget = self._build_keyboard()
+        
+        # Remove background - parent container provides it
+        self._keyboard_widget.setStyleSheet("background: transparent; border: none; padding: 0px;")
+        
+        # Use flexible size policy - allow shrinking below minimum if needed
+        self._keyboard_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # Set a very small minimum to allow maximum flexibility
+        self._keyboard_widget.setMinimumSize(400, 150)
+        bottom_row.addWidget(self._keyboard_widget, 2)  # Stretch factor 2 (keyboard gets more space)
+        
+        layout.addWidget(self._bottom_container)
+        
+        # Connect resize event to adjust layout dynamically
+        self._bottom_container.installEventFilter(self)
+        
         self.setCentralWidget(root)
 
         self.start_shortcut = QShortcut(Qt.CTRL | Qt.Key_Return, self)
@@ -562,10 +828,142 @@ class MainWindow(QMainWindow):
         self._set_input_error_state(False)
 
     def eventFilter(self, obj, event) -> bool:
-        """Filter key events to track individual keystrokes"""
+        """Filter key events to track individual keystrokes and resize events"""
         if obj == self.input_box and event.type() == event.Type.KeyPress:
             return self._on_key_press(event)
+        elif obj == self._bottom_container and event.type() == event.Type.Resize:
+            # Handle resize events for adaptive layout
+            QTimer.singleShot(10, self._adjust_adaptive_layout)  # Delay to ensure size is updated
         return super().eventFilter(obj, event)
+    
+    def resizeEvent(self, event) -> None:
+        """Handle window resize to adjust keyboard and finger UI"""
+        super().resizeEvent(event)
+        QTimer.singleShot(10, self._adjust_adaptive_layout)  # Delay to ensure size is updated
+    
+    def _adjust_adaptive_layout(self) -> None:
+        """Adjust keyboard and finger UI sizes based on available space"""
+        if not self._keyboard_widget or not self._bottom_container:
+            return
+        
+        # Calculate available width (accounting for margins and spacing)
+        available_width = self._bottom_container.width() - 40  # Padding
+        if available_width <= 0:
+            return
+        
+        # Calculate space allocation
+        # Reserve minimum space for finger UI, rest for keyboard
+        min_hands_width = 200
+        max_hands_width = 600
+        hands_ratio = 0.3  # Finger UI should take ~30% of space
+        
+        # Calculate ideal widths
+        ideal_hands_width = min(max_hands_width, max(min_hands_width, int(available_width * hands_ratio)))
+        keyboard_width = available_width - ideal_hands_width - 15  # 15px spacing
+        
+        # Ensure keyboard has reasonable minimum width
+        min_keyboard_width = 400  # Reduced from 600 to allow more flexibility
+        if keyboard_width < min_keyboard_width and available_width > min_keyboard_width + min_hands_width + 15:
+            # Only enforce minimum if we have enough total space
+            keyboard_width = min_keyboard_width
+            ideal_hands_width = available_width - keyboard_width - 15
+            ideal_hands_width = max(min_hands_width, ideal_hands_width)
+        
+        # Adjust hands image if needed
+        if self._hands_image_label and self._original_hands_pixmap:
+            current_width = self._hands_image_label.width()
+            if abs(ideal_hands_width - current_width) > 10:  # Only update if significant change
+                scaled_pixmap = self._original_hands_pixmap.scaledToWidth(
+                    ideal_hands_width, Qt.SmoothTransformation
+                )
+                self._hands_image_label.setPixmap(scaled_pixmap)
+                self._hands_image_label.setMinimumWidth(ideal_hands_width)
+                self._hands_image_label.setMaximumWidth(ideal_hands_width)
+        
+        # Update keyboard font sizes based on actual width
+        if keyboard_width > 0:
+            self._update_keyboard_font_sizes(keyboard_width)
+    
+    def _update_keyboard_font_sizes(self, keyboard_width: int) -> None:
+        """Update keyboard font sizes based on available width"""
+        if not self._keyboard_widget:
+            return
+        
+        # Reference: 1402px keyboard width = 18px base font
+        # Scale font proportionally with keyboard width
+        reference_keyboard_width = 1402
+        font_scale = keyboard_width / reference_keyboard_width
+        base_font_size = max(12, int(18 * font_scale))
+        
+        # Calculate derived font sizes
+        tamil_base_font = base_font_size
+        english_font = max(7, int(base_font_size * 0.75))
+        tamil_shift_font = max(9, int(base_font_size * 0.75))
+        special_font = max(9, int(base_font_size * 0.78))
+        
+        # Only update if font sizes changed significantly
+        if (self._keyboard_font_sizes.get('base', 0) != base_font_size or
+            abs(self._keyboard_font_sizes.get('base', 18) - base_font_size) > 1):
+            
+            # Store font sizes
+            self._keyboard_font_sizes = {
+                'base': base_font_size,
+                'tamil_base': tamil_base_font,
+                'english': english_font,
+                'tamil_shift': tamil_shift_font,
+                'special': special_font
+            }
+            
+            # Rebuild keyboard HTML with new font sizes
+            self._rebuild_keyboard_labels()
+            
+            # Update special key labels
+            colors = self._get_theme_colors()
+            special_labels = {
+                "Backspace": "←",
+                "Tab": "Tab",
+                "Caps": "Caps Lock",
+                "Enter": "Enter",
+                "Shift": "Shift",
+                "Ctrl": "Ctrl",
+                "Alt": "Alt",
+                "Space": "Space",
+            }
+            
+            # Update Space key
+            if "Space" in self._key_labels:
+                space_label = self._key_labels["Space"]
+                key_style = f"""
+                    QLabel {{
+                        background: {colors['key_bg']};
+                        color: {colors['text_primary']};
+                        border: none;
+                        border-radius: 6px;
+                        padding: 12px 8px;
+                        font-family: '{self._marutham_font_family}', sans-serif;
+                        font-size: {special_font}px;
+                        font-weight: 400;
+                        color: {colors['text_muted']};
+                    }}
+                """
+                space_label.setStyleSheet(key_style)
+            
+            # Update shift labels
+            for shift_label in self._shift_labels:
+                key_style = f"""
+                    QLabel {{
+                        background: {colors['key_bg']};
+                        color: {colors['text_primary']};
+                        border: none;
+                        border-radius: 6px;
+                        padding: 12px 8px;
+                        font-family: '{self._marutham_font_family}', sans-serif;
+                        font-size: {special_font}px;
+                        font-weight: 400;
+                        color: {colors['text_muted']};
+                    }}
+                """
+                shift_label.setStyleSheet(key_style)
     
     def _on_key_press(self, event: QKeyEvent) -> bool:
         """Handle individual key press events"""
@@ -854,9 +1252,32 @@ class MainWindow(QMainWindow):
         container = QWidget()
         grid = QGridLayout(container)
         grid.setSpacing(8)
-        container.setStyleSheet("background: #2d3748; border-radius: 12px; padding: 16px;")
+        # Set padding to match outer container padding for proper spacing
+        container.setStyleSheet("background: #ffffff; border-radius: 12px; padding: 0px;")
 
         colors = self._get_theme_colors()
+        
+        # Calculate base font size - will be updated dynamically based on actual width
+        # Use initial estimate based on screen size
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            screen_width = screen.availableGeometry().width()
+            # Reference: 1920px screen = 18px base font
+            # Scale font proportionally with screen width
+            font_scale = screen_width / 1920.0
+            base_font_size = max(14, int(18 * font_scale))
+        else:
+            base_font_size = 18
+        
+        # Store initial font sizes
+        self._keyboard_font_sizes = {
+            'base': base_font_size,
+            'tamil_base': base_font_size,
+            'english': max(8, int(base_font_size * 0.75)),
+            'tamil_shift': max(10, int(base_font_size * 0.75)),
+            'special': max(10, int(base_font_size * 0.78))
+        }
+        
         key_style = f"""
             QLabel {{
                 background: {colors['key_bg']};
@@ -864,8 +1285,8 @@ class MainWindow(QMainWindow):
                 border: none;
                 border-radius: 6px;
                 padding: 12px 8px;
-                font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
-                font-size: 18px;
+                font-family: '{self._marutham_font_family}', sans-serif;
+                font-size: {base_font_size}px;
                 font-weight: 400;
             }}
         """
@@ -891,6 +1312,7 @@ class MainWindow(QMainWindow):
 
         unit_pixels = 12
         unit_scale = 4
+        base_key_height = 44
         special_labels = {
             "Backspace": "←",
             "Tab": "Tab",
@@ -901,6 +1323,23 @@ class MainWindow(QMainWindow):
             "Alt": "Alt",
             "Space": "Space",
         }
+
+        # Calculate font sizes based on the base font size (which scales with screen)
+        # These ratios maintain good readability at different sizes
+        tamil_base_font = self._keyboard_font_sizes['tamil_base']
+        english_font = self._keyboard_font_sizes['english']
+        tamil_shift_font = self._keyboard_font_sizes['tamil_shift']
+        special_font = self._keyboard_font_sizes['special']
+
+        # Use percentage-based spacing for consistent appearance across all key sizes
+        # The middle column will take 15% of the table width, ensuring uniform spacing
+        label_spacing_percent = 100
+
+        logging.info(f"Base font size: {base_font_size}")
+        logging.info(f"English font: {english_font}")
+        logging.info(f"Tamil base font: {tamil_base_font}")
+        logging.info(f"Tamil shift font: {tamil_shift_font}")
+        logging.info(f"Special font: {special_font}")
 
         for row_index, row in enumerate(rows):
             col = 0
@@ -913,28 +1352,48 @@ class MainWindow(QMainWindow):
                 label = QLabel()
                 label.setAlignment(Qt.AlignCenter)
                 label.setTextFormat(Qt.RichText)
+                
+                # Calculate key dimensions - use flexible sizing
+                # Base width will scale with grid columns
+                key_width = int(unit_pixels * size * unit_scale)
+                key_height = base_key_height
+                
+                # Log each key size
+                logging.info(f"Key: {key}, Size: {size}, Width: {key_width}px, Height: {key_height}px")
+                
                 label.setStyleSheet(key_style)
-                label.setMinimumHeight(44)
-                label.setMinimumWidth(int(unit_pixels * size * unit_scale))
+                label.setMinimumHeight(key_height)
+                # Don't set fixed minimum width - let grid handle it with stretch factors
+                # This allows keys to scale down when space is limited
+                label.setMinimumWidth(0)
                 colors = self._get_theme_colors()
                 if key in special_labels:
                     label.setText(html.escape(special_labels[key]))
-                    label.setStyleSheet(key_style + f"QLabel {{ font-size: 14px; color: {colors['text_muted']}; }}")
+                    label.setStyleSheet(key_style + f"QLabel {{ font-family: '{self._marutham_font_family}', sans-serif; font-size: {special_font}px; color: {colors['text_muted']}; }}")
                 else:
                     english = html.escape(key)
                     tamil_base = html.escape(display[0]) if display[0] else ""
                     tamil_shift = html.escape(display[1]) if display[1] else ""
                     label.setText(
-                        '<table style="width:100%; height:100%; border-collapse:collapse;">'
-                        "<tr>"
-                        f'<td style="font-size:10px; color:{colors["text_muted"]}; vertical-align:top; text-align:left;">{english}</td>'
-                        '<td style="width:6px;"></td>'
-                        f'<td style="font-size:12px; color:{colors["text_muted"]}; vertical-align:top; text-align:right;">{tamil_shift}</td>'
-                        "</tr>"
-                        "<tr>"
-                        f'<td style="font-size:18px; font-weight:600; vertical-align:bottom; text-align:center;">{tamil_base}</td>'
-                        "</tr>"
-                        "</table>"
+                        '<table width="100%" height="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+                            '<tr>'
+                                f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
+                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                                f'font-size:{english_font}px; color:{colors["text_muted"]}; ">{english}</td>'
+
+                                '<td style="width:5px;"></td>'
+
+                                f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
+                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                                f'font-size:{tamil_shift_font}px; color:{colors["text_muted"]}; ">{tamil_shift}</td>'
+                            '</tr>'
+
+                            '<tr>'
+                                f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
+                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                                f'font-size:{tamil_base_font}px; font-weight:600; ">{tamil_base}</td>'
+                            '</tr>'
+                        '</table>'
                     )
 
                 grid.addWidget(label, row_index, col, 1, span)
@@ -949,10 +1408,62 @@ class MainWindow(QMainWindow):
 
         max_columns = max(sum(int(size * unit_scale) for _, size in row) for row in rows)
         for column in range(max_columns):
-            grid.setColumnMinimumWidth(column, unit_pixels)
+            # Set a very small minimum width to allow scaling down
+            grid.setColumnMinimumWidth(column, 2)
+            # Use stretch factors to allow columns to scale proportionally
             grid.setColumnStretch(column, 1)
+        
+        # Ensure the grid layout has proper margins to prevent cropping
+        grid.setContentsMargins(0, 0, 0, 0)
+        
+        # Store keyboard container reference for font updates
+        container._key_labels_ref = self._key_labels
+        container._shift_labels_ref = self._shift_labels
 
         return container
+    
+    def _rebuild_keyboard_labels(self) -> None:
+        """Rebuild keyboard label HTML with updated font sizes"""
+        if not self._keyboard_widget or not self._keyboard_font_sizes:
+            return
+        
+        colors = self._get_theme_colors()
+        tamil_base_font = self._keyboard_font_sizes.get('tamil_base', 18)
+        english_font = self._keyboard_font_sizes.get('english', 14)
+        tamil_shift_font = self._keyboard_font_sizes.get('tamil_shift', 14)
+        
+        # Special keys that shouldn't be updated (handled separately)
+        special_keys = {"Space", "Tab", "Caps", "Enter", "Backspace", "Ctrl", "Alt", "Shift"}
+        
+        # Update all regular key labels (non-special keys)
+        for key_name, label in self._key_labels.items():
+            if key_name in special_keys:
+                continue  # Special keys are handled separately
+            
+            # Get the key display mapping
+            display = self._keycaps_map.get(key_name, (key_name, None))
+            english = html.escape(key_name)
+            tamil_base = html.escape(display[0]) if display[0] else ""
+            tamil_shift = html.escape(display[1]) if display[1] else ""
+            
+            label.setText(
+                '<table width="100%" height="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+                    '<tr>'
+                        f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
+                        f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                        f'font-size:{english_font}px; color:{colors["text_muted"]}; ">{english}</td>'
+                        '<td style="width:5px;"></td>'
+                        f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
+                        f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                        f'font-size:{tamil_shift_font}px; color:{colors["text_muted"]}; ">{tamil_shift}</td>'
+                    '</tr>'
+                    '<tr>'
+                        f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
+                        f'font-family:\'{self._marutham_font_family}\', sans-serif; '
+                        f'font-size:{tamil_base_font}px; font-weight:600; ">{tamil_base}</td>'
+                    '</tr>'
+                '</table>'
+            )
 
     def _clear_keyboard_highlight(self) -> None:
         colors = self._get_theme_colors()
@@ -964,14 +1475,14 @@ class MainWindow(QMainWindow):
                     border: none;
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: '{self._marutham_font_family}', sans-serif;
                     font-size: 18px;
                     font-weight: 400;
                 }}
             """)
         self._highlighted_keys = []
 
-    def _highlight_key(self, label: QLabel, is_shift: bool = False) -> None:
+    def _highlight_key(self, label: QLabel, key_label: str = "", is_shift: bool = False) -> None:
         colors = self._get_theme_colors()
         if is_shift:
             style = f"""
@@ -981,7 +1492,7 @@ class MainWindow(QMainWindow):
                     border: 2px solid {colors['key_shift']};
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: '{self._marutham_font_family}', sans-serif;
                     font-size: 18px;
                     font-weight: 500;
                 }}
@@ -994,7 +1505,7 @@ class MainWindow(QMainWindow):
                     border: 2px solid {colors['key_highlight']};
                     border-radius: 6px;
                     padding: 12px 8px;
-                    font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                    font-family: '{self._marutham_font_family}', sans-serif;
                     font-size: 18px;
                     font-weight: 500;
                 }}
@@ -1005,6 +1516,9 @@ class MainWindow(QMainWindow):
     def _update_keyboard_hint(self) -> None:
         if not self._session:
             self._clear_keyboard_highlight()
+            if self._finger_guidance_label:
+                self._finger_guidance_label.setText("")
+                self._finger_guidance_label.setVisible(False)
             return
 
         if self._keystroke_index < len(self._keystroke_sequence):
@@ -1015,10 +1529,21 @@ class MainWindow(QMainWindow):
                 key_label = "Space"
             
             if key_label in self._key_labels:
-                self._highlight_key(self._key_labels[key_label])
+                self._highlight_key(self._key_labels[key_label], key_label=key_label)
             if needs_shift:
                 for shift_label in self._shift_labels:
-                    self._highlight_key(shift_label, is_shift=True)
+                    self._highlight_key(shift_label, key_label="Shift", is_shift=True)
+            
+            # Update finger guidance label
+            if self._finger_guidance_label:
+                english_finger, tamil_finger = self._get_finger_name(key_label, needs_shift)
+                # Format: "Use Left Thumb / இடது கட்டைவிரல்"
+                if needs_shift:
+                    guidance_text = f"<div style='text-align: center;'>Hold Shift<br/>{english_finger}<br/>{tamil_finger}</div>"
+                else:
+                    guidance_text = f"<div style='text-align: center;'>Use {english_finger}<br/>{tamil_finger}</div>"
+                self._finger_guidance_label.setText(guidance_text)
+                self._finger_guidance_label.setVisible(True)
         else:
             # Task is complete - highlight space bar to indicate user should press space for next task
             self._clear_keyboard_highlight()
@@ -1032,12 +1557,19 @@ class MainWindow(QMainWindow):
                         border: 2px solid {colors['success']};
                         border-radius: 6px;
                         padding: 12px 8px;
-                        font-family: 'Noto Sans Tamil', 'Latha', 'Sans Serif';
+                        font-family: '{self._marutham_font_family}', sans-serif;
                         font-size: 18px;
                         font-weight: 500;
                     }}
                 """)
                 self._highlighted_keys.append(space_label)
+            
+            # Update finger guidance for space bar
+            if self._finger_guidance_label:
+                english_finger, tamil_finger = self._get_finger_name("Space", False)
+                guidance_text = f"Press Space to continue<br/>Use {english_finger}<br/>{tamil_finger}"
+                self._finger_guidance_label.setText(guidance_text)
+                self._finger_guidance_label.setVisible(True)
     
     def _build_keystroke_sequence(self, text: str) -> list[tuple[str, bool]]:
         """Build the keystroke sequence for Tamil99 text."""
@@ -1304,7 +1836,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+                    font-family: '{self._marutham_font_family}', sans-serif;
                 }}
             """)
         else:
@@ -1317,7 +1849,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: 'Noto Sans Tamil', 'Latha', sans-serif;
+                    font-family: '{self._marutham_font_family}', sans-serif;
                 }}
                 QLineEdit:focus {{
                     border: 2px solid {colors['highlight']};
@@ -1333,11 +1865,11 @@ class MainWindow(QMainWindow):
         task_size = max(16.0, height * 0.035)
         input_size = max(15.0, height * 0.03)
 
-        task_font = QFont("Sans Serif")
+        task_font = QFont(self._marutham_font_family)
         task_font.setPointSizeF(task_size)
         self.task_display.setFont(task_font)
 
-        input_font = QFont("Sans Serif")
+        input_font = QFont(self._marutham_font_family)
         input_font.setPointSizeF(input_size)
         self.input_box.setFont(input_font)
 
