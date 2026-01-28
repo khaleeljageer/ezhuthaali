@@ -600,6 +600,7 @@ class MainWindow(QMainWindow):
         finger_ui_layout = QVBoxLayout(finger_ui_container)
         finger_ui_layout.setSpacing(10)
         finger_ui_layout.setContentsMargins(0, 0, 0, 0)
+        finger_ui_layout.setAlignment(Qt.AlignCenter)  # Center all contents
         
         # Finger guidance label
         self._finger_guidance_label = QLabel("")
@@ -619,9 +620,9 @@ class MainWindow(QMainWindow):
             }}
         """)
         self._finger_guidance_label.setVisible(False)  # Hidden until session starts
-        finger_ui_layout.addWidget(self._finger_guidance_label)
+        finger_ui_layout.addWidget(self._finger_guidance_label, 0, Qt.AlignCenter)
         
-        # Hands image
+        # Hands image - centered to match text layout
         hands_image_path = Path(__file__).parent.parent / "assets" / "hands.png"
         if hands_image_path.exists():
             self._hands_image_label = QLabel()
@@ -641,7 +642,8 @@ class MainWindow(QMainWindow):
             self._hands_image_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
             self._hands_image_label.setMinimumWidth(200)  # Minimum to prevent too small
             self._hands_image_label.setMinimumHeight(100)  # Minimum height
-            finger_ui_layout.addWidget(self._hands_image_label)
+            # Center the hands image to align with the text layout above
+            finger_ui_layout.addWidget(self._hands_image_label, 0, Qt.AlignCenter)
         
         bottom_row.addWidget(finger_ui_container, 1)  # Stretch factor 1
         
