@@ -94,6 +94,8 @@ class MainWindow(QMainWindow):
         self._highlighted_keys: list[QLabel] = []
         self._key_labels: dict[str, QLabel] = {}
         self._shift_labels: list[QLabel] = []
+        self._left_shift_label: Optional[QLabel] = None
+        self._right_shift_label: Optional[QLabel] = None
         self._current_task_text: str = ""
         self._task_display_offset: int = 0
         self._unlock_all_levels = os.environ.get("EZUTHALI_UNLOCK_ALL") == "1"
@@ -233,10 +235,12 @@ class MainWindow(QMainWindow):
             # For now, default to right shift (pinky)
             hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
         elif needs_shift:
-            # If shift is needed, use right shift (pinky) for the shift key
-            # But also get the finger for the actual key being pressed
-            # For shift combinations, typically use right shift
-            hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
+            # Shift rule:
+            # - If the actual key is typed with LEFT hand -> use RIGHT shift
+            # - If the actual key is typed with RIGHT hand -> use LEFT shift
+            key_hand, _key_finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+            shift_hand = 'right' if key_hand == 'left' else 'left'
+            hand, finger = (shift_hand, 'pinky')
         else:
             # Regular key - get finger mapping
             hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
@@ -260,6 +264,11 @@ class MainWindow(QMainWindow):
         tamil_name = f"{hand_names_tamil.get(hand, hand)} {finger_names_tamil.get(finger, finger)}"
         
         return (english_name, tamil_name)
+
+    def _shift_side_for_key(self, key_label: str) -> str:
+        """Return which Shift side to use for a given key label ('left' or 'right')."""
+        key_hand, _ = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+        return 'right' if key_hand == 'left' else 'left'
 
     def _get_theme_colors(self) -> dict:
         """Get light theme color palette"""
@@ -303,12 +312,45 @@ class MainWindow(QMainWindow):
             ('right', 'thumb'): '#EB78D2',
         }
 
+    def _darken_hex_color(self, hex_color: str, factor: float) -> str:
+        """Darken a hex color by multiplying RGB by factor (0..1)."""
+        try:
+            c = hex_color.strip()
+            if not c.startswith("#"):
+                return hex_color
+            if len(c) != 7:
+                return hex_color
+            factor = max(0.0, min(1.0, factor))
+            r = int(c[1:3], 16)
+            g = int(c[3:5], 16)
+            b = int(c[5:7], 16)
+            r = max(0, min(255, int(r * factor)))
+            g = max(0, min(255, int(g * factor)))
+            b = max(0, min(255, int(b * factor)))
+            return f"#{r:02X}{g:02X}{b:02X}"
+        except Exception:
+            return hex_color
+
     def _finger_color_for_key(self, key_label: str) -> str:
         """Return background color for a given key label."""
         hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
         return self._get_finger_colors().get((hand, finger), '#5C96EB')
 
-    def _build_key_style(self, key_label: str, font_px: int, *, border_px: int = 0, border_color: str = "#ffffff", font_weight: int = 500) -> str:
+    def _highlight_border_color_for_key(self, key_label: str) -> str:
+        """Border color for highlight that matches the finger palette (darker shade)."""
+        base = self._finger_color_for_key(key_label)
+        # Dark enough to pop on the filled key, but still in the same hue family.
+        return self._darken_hex_color(base, 0.45)
+
+    def _build_key_style(
+        self,
+        key_label: str,
+        font_px: int,
+        *,
+        border_px: int = 4,
+        border_color: str = "transparent",
+        font_weight: int = 500,
+    ) -> str:
         bg = self._finger_color_for_key(key_label)
         border = f"{border_px}px solid {border_color}" if border_px > 0 else "none"
         return f"""
@@ -995,13 +1037,13 @@ class MainWindow(QMainWindow):
             # Update Space key
             if "Space" in self._key_labels:
                 space_label = self._key_labels["Space"]
-                style = self._build_key_style("Space", special_font, border_px=0, font_weight=500)
+                style = self._build_key_style("Space", special_font, font_weight=500)
                 space_label.setStyleSheet(style)
                 self._key_base_style_by_label[space_label] = style
             
             # Update shift labels
             for shift_label in self._shift_labels:
-                style = self._build_key_style("Shift", special_font, border_px=0, font_weight=500)
+                style = self._build_key_style("Shift", special_font, font_weight=500)
                 shift_label.setStyleSheet(style)
                 self._key_base_style_by_label[shift_label] = style
     
@@ -1371,6 +1413,7 @@ class MainWindow(QMainWindow):
         for row_index, row in enumerate(rows):
             col = 0
             for key, size in row:
+                start_col = col
                 span = int(size * unit_scale)
                 if key is None:
                     col += span
@@ -1395,14 +1438,14 @@ class MainWindow(QMainWindow):
 
                 if key in special_labels:
                     label.setText(html.escape(special_labels[key]))
-                    style = self._build_key_style(key, special_font, border_px=0, font_weight=500)
+                    style = self._build_key_style(key, special_font, font_weight=500)
                     label.setStyleSheet(style)
                     self._key_base_style_by_label[label] = style
                 else:
                     english = html.escape(key)
                     tamil_base = html.escape(display[0]) if display[0] else ""
                     tamil_shift = html.escape(display[1]) if display[1] else ""
-                    style = self._build_key_style(key, base_font_size, border_px=0, font_weight=500)
+                    style = self._build_key_style(key, base_font_size, font_weight=500)
                     label.setStyleSheet(style)
                     self._key_base_style_by_label[label] = style
                     label.setText(
@@ -1436,6 +1479,11 @@ class MainWindow(QMainWindow):
                     self._key_labels[key.upper()] = label
                 if key == "Shift":
                     self._shift_labels.append(label)
+                    # Identify left vs right shift by position (row 3 has two Shift keys)
+                    if row_index == 3 and start_col == 0:
+                        self._left_shift_label = label
+                    elif row_index == 3:
+                        self._right_shift_label = label
 
         max_columns = max(sum(int(size * unit_scale) for _, size in row) for row in rows)
         for column in range(max_columns):
@@ -1505,7 +1553,9 @@ class MainWindow(QMainWindow):
 
     def _highlight_key(self, label: QLabel, key_label: str = "", is_shift: bool = False) -> None:
         font_px = self._keyboard_font_sizes.get('special', 18) if (is_shift or key_label in {"Shift", "Space", "Backspace", "Tab", "Caps", "Enter", "Ctrl", "Alt"}) else self._keyboard_font_sizes.get('base', 18)
-        style = self._build_key_style(key_label or "Shift", font_px, border_px=4, border_color="#000000", font_weight=800)
+        highlight_key = key_label or "Shift"
+        border_color = self._highlight_border_color_for_key(highlight_key)
+        style = self._build_key_style(highlight_key, font_px, border_px=4, border_color=border_color, font_weight=500)
         label.setStyleSheet(style)
         self._highlighted_keys.append(label)
 
@@ -1527,15 +1577,23 @@ class MainWindow(QMainWindow):
             if key_label in self._key_labels:
                 self._highlight_key(self._key_labels[key_label], key_label=key_label)
             if needs_shift:
-                for shift_label in self._shift_labels:
+                # Highlight the correct Shift key based on hand rule
+                side = self._shift_side_for_key(key_label)
+                shift_label = self._right_shift_label if side == 'right' else self._left_shift_label
+                if shift_label is not None:
                     self._highlight_key(shift_label, key_label="Shift", is_shift=True)
+                else:
+                    # Fallback if we couldn't identify sides
+                    for s in self._shift_labels:
+                        self._highlight_key(s, key_label="Shift", is_shift=True)
             
             # Update finger guidance label
             if self._finger_guidance_label:
                 english_finger, tamil_finger = self._get_finger_name(key_label, needs_shift)
                 # Format: "Use Left Thumb / இடது கட்டைவிரல்"
                 if needs_shift:
-                    guidance_text = f"<div style='text-align: center;'>Hold Shift<br/>{english_finger}<br/>{tamil_finger}</div>"
+                    shift_side = self._shift_side_for_key(key_label)
+                    guidance_text = f"<div style='text-align: center;'>Hold {shift_side.capitalize()} Shift<br/>{english_finger}<br/>{tamil_finger}</div>"
                 else:
                     guidance_text = f"<div style='text-align: center;'>Use {english_finger}<br/>{tamil_finger}</div>"
                 self._finger_guidance_label.setText(guidance_text)
@@ -1547,16 +1605,17 @@ class MainWindow(QMainWindow):
                 space_label = self._key_labels["Space"]
                 colors = self._get_theme_colors()
                 font_px = self._keyboard_font_sizes.get('special', 18)
+                border_color = self._highlight_border_color_for_key("Space")
                 space_label.setStyleSheet(f"""
                     QLabel {{
                         background: {colors['success_bg']};
                         color: #ffffff;
-                        border: 4px solid #000000;
+                        border: 4px solid {border_color};
                         border-radius: 6px;
                         padding: 12px 8px;
                         font-family: '{self._marutham_font_family}', sans-serif;
                         font-size: {font_px}px;
-                        font-weight: 800;
+                        font-weight: 500;
                     }}
                 """)
                 self._highlighted_keys.append(space_label)
