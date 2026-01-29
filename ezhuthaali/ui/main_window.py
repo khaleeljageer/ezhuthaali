@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QObject, QSize
+from PySide6.QtCore import Qt, QTimer, QObject, QSize, QPropertyAnimation
 from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap, QGuiApplication, QFontDatabase, QPainter
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QGraphicsOpacityEffect,
     QSizePolicy,
     QStyle,
     QVBoxLayout,
@@ -131,6 +132,11 @@ class MainWindow(QMainWindow):
         self._background_svg_path: Optional[Path] = None
         self._background_svg_renderer: Optional[QSvgRenderer] = None
         self._background_label: Optional[QLabel] = None
+
+        # Invalid input overlay (red flash)
+        self._error_overlay: Optional[QWidget] = None
+        self._error_overlay_effect: Optional[QGraphicsOpacityEffect] = None
+        self._error_overlay_anim: Optional[QPropertyAnimation] = None
         
         # Finger mapping for QWERTY/Tamil99 layout
         self._key_to_finger = self._build_finger_mapping()
@@ -427,6 +433,15 @@ class MainWindow(QMainWindow):
             self._background_label.setAlignment(Qt.AlignCenter)
             self._background_label.lower()  # Put it behind everything
             self._background_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # Allow clicks to pass through
+
+        # Create invalid input overlay (as child of main window to cover entire window)
+        self._error_overlay = QWidget(self)
+        self._error_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._error_overlay.setStyleSheet("background-color: #EF6060;")
+        self._error_overlay_effect = QGraphicsOpacityEffect(self._error_overlay)
+        self._error_overlay_effect.setOpacity(0.0)
+        self._error_overlay.setGraphicsEffect(self._error_overlay_effect)
+        self._error_overlay.hide()
         
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -768,6 +783,7 @@ class MainWindow(QMainWindow):
         
         # Update background after window is set up
         self._update_background()
+        self._update_error_overlay_geometry()
 
         self.start_shortcut = QShortcut(Qt.CTRL | Qt.Key_Return, self)
         self.start_shortcut.activated.connect(self._submit_task)
@@ -943,6 +959,7 @@ class MainWindow(QMainWindow):
         """Handle window resize to adjust keyboard and finger UI"""
         super().resizeEvent(event)
         self._update_background()
+        self._update_error_overlay_geometry()
         QTimer.singleShot(10, self._adjust_adaptive_layout)  # Delay to ensure size is updated
     
     def _adjust_adaptive_layout(self) -> None:
@@ -1106,11 +1123,49 @@ class MainWindow(QMainWindow):
             self._input_has_error = True
             self._set_input_error_state(True)
             self._update_display_from_keystrokes()
+            self._flash_invalid_input_overlay()
         
         self._update_keyboard_hint()
         self._update_stats_from_tracker()
         
         return True
+
+    def _update_error_overlay_geometry(self) -> None:
+        if not self._error_overlay:
+            return
+        s = self.size()
+        self._error_overlay.setGeometry(0, 0, s.width(), s.height())
+
+    def _flash_invalid_input_overlay(self, duration_ms: int = 200) -> None:
+        """Flash a short red overlay on invalid input."""
+        if not self._error_overlay or not self._error_overlay_effect:
+            return
+
+        # Stop any running animation and ensure we don't stack finished callbacks
+        if self._error_overlay_anim is not None:
+            try:
+                self._error_overlay_anim.stop()
+            except Exception:
+                pass
+
+        self._update_error_overlay_geometry()
+        self._error_overlay.show()
+        self._error_overlay.raise_()
+
+        self._error_overlay_effect.setOpacity(0.0)
+        anim = QPropertyAnimation(self._error_overlay_effect, b"opacity", self)
+        anim.setDuration(max(50, int(duration_ms)))
+        anim.setKeyValueAt(0.0, 0.0)
+        anim.setKeyValueAt(0.2, 0.28)
+        anim.setKeyValueAt(1.0, 0.0)
+
+        def _hide() -> None:
+            if self._error_overlay:
+                self._error_overlay.hide()
+
+        anim.finished.connect(_hide)
+        anim.start()
+        self._error_overlay_anim = anim
     
     def _update_typed_tamil_text_from_keystrokes(self) -> None:
         """Reconstruct Tamil text from typed keystrokes"""
