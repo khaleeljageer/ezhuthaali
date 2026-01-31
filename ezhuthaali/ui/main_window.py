@@ -455,6 +455,13 @@ class MainWindow(QMainWindow):
         self._error_overlay_effect.setOpacity(0.0)
         self._error_overlay.setGraphicsEffect(self._error_overlay_effect)
         self._error_overlay.hide()
+        # Create the animation ONCE and reuse it (prevents accumulating children)
+        self._error_overlay_anim = QPropertyAnimation(self._error_overlay_effect, b"opacity", self)
+        self._error_overlay_anim.setDuration(200)
+        self._error_overlay_anim.setKeyValueAt(0.0, 0.0)
+        self._error_overlay_anim.setKeyValueAt(0.2, 0.28)
+        self._error_overlay_anim.setKeyValueAt(1.0, 0.0)
+        self._error_overlay_anim.finished.connect(self._error_overlay.hide)
         
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -1151,34 +1158,22 @@ class MainWindow(QMainWindow):
 
     def _flash_invalid_input_overlay(self, duration_ms: int = 200) -> None:
         """Flash a short red overlay on invalid input."""
-        if not self._error_overlay or not self._error_overlay_effect:
+        if not self._error_overlay or not self._error_overlay_effect or not self._error_overlay_anim:
             return
-
-        # Stop any running animation and ensure we don't stack finished callbacks
-        if self._error_overlay_anim is not None:
-            try:
-                self._error_overlay_anim.stop()
-            except Exception:
-                pass
+        
+        # Stop any running animation (we reuse the same object)
+        try:
+            self._error_overlay_anim.stop()
+        except Exception:
+            pass
 
         self._update_error_overlay_geometry()
         self._error_overlay.show()
         self._error_overlay.raise_()
 
         self._error_overlay_effect.setOpacity(0.0)
-        anim = QPropertyAnimation(self._error_overlay_effect, b"opacity", self)
-        anim.setDuration(max(50, int(duration_ms)))
-        anim.setKeyValueAt(0.0, 0.0)
-        anim.setKeyValueAt(0.2, 0.28)
-        anim.setKeyValueAt(1.0, 0.0)
-
-        def _hide() -> None:
-            if self._error_overlay:
-                self._error_overlay.hide()
-
-        anim.finished.connect(_hide)
-        anim.start()
-        self._error_overlay_anim = anim
+        self._error_overlay_anim.setDuration(max(50, int(duration_ms)))
+        self._error_overlay_anim.start()
     
     def _update_typed_tamil_text_from_keystrokes(self) -> None:
         """Reconstruct Tamil text from typed keystrokes"""
