@@ -4,14 +4,15 @@ from dataclasses import dataclass
 import html
 import re
 import os
-import json
 import logging
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer, QObject, QSize
-from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap, QGuiApplication, QFontDatabase
+from PySide6.QtCore import Qt, QTimer, QSize, QPropertyAnimation
+from PySide6.QtGui import QFont, QShortcut, QKeyEvent, QPixmap, QGuiApplication, QPainter
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QApplication,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QGraphicsOpacityEffect,
     QSizePolicy,
     QStyle,
     QVBoxLayout,
@@ -93,6 +95,8 @@ class MainWindow(QMainWindow):
         self._highlighted_keys: list[QLabel] = []
         self._key_labels: dict[str, QLabel] = {}
         self._shift_labels: list[QLabel] = []
+        self._left_shift_label: Optional[QLabel] = None
+        self._right_shift_label: Optional[QLabel] = None
         self._current_task_text: str = ""
         self._task_display_offset: int = 0
         self._unlock_all_levels = os.environ.get("EZUTHALI_UNLOCK_ALL") == "1"
@@ -122,34 +126,27 @@ class MainWindow(QMainWindow):
         self._bottom_container: Optional[QWidget] = None
         self._keyboard_font_sizes: dict[str, int] = {}  # Store current font sizes
         self._finger_guidance_label: Optional[QLabel] = None
+        self._key_base_style_by_label: dict[QLabel, str] = {}
+        
+        # Background SVG
+        self._background_svg_path: Optional[Path] = None
+        self._background_svg_renderer: Optional[QSvgRenderer] = None
+        self._background_label: Optional[QLabel] = None
+        self._background_update_timer: Optional[QTimer] = None
+        self._background_last_render_key: Optional[tuple[int, int, float]] = None
+
+        # Invalid input overlay (red flash)
+        self._error_overlay: Optional[QWidget] = None
+        self._error_overlay_effect: Optional[QGraphicsOpacityEffect] = None
+        self._error_overlay_anim: Optional[QPropertyAnimation] = None
         
         # Finger mapping for QWERTY/Tamil99 layout
         self._key_to_finger = self._build_finger_mapping()
-
-        # Load Marutham font from assets
-        self._load_marutham_font()
 
         self._build_ui()
         self._refresh_levels_list()
         QTimer.singleShot(0, self.showMaximized)
 
-    def _load_marutham_font(self) -> None:
-        """Load Marutham font from assets"""
-        font_path = Path(__file__).parent.parent / "assets" / "TAU-Marutham.ttf"
-        if font_path.exists():
-            font_id = QFontDatabase.addApplicationFont(str(font_path))
-            if font_id != -1:
-                font_families = QFontDatabase.applicationFontFamilies(font_id)
-                if font_families:
-                    self._marutham_font_family = font_families[0]
-                    logging.info(f"Loaded Marutham font: {self._marutham_font_family}")
-                else:
-                    self._marutham_font_family = "TAU-Marutham"
-            else:
-                self._marutham_font_family = "TAU-Marutham"
-        else:
-            self._marutham_font_family = "TAU-Marutham"
-            logging.warning(f"Marutham font not found at {font_path}")
     
     def _build_finger_mapping(self) -> dict[str, tuple[str, str]]:
         """Build mapping from key to (hand, finger) tuple.
@@ -226,10 +223,12 @@ class MainWindow(QMainWindow):
             # For now, default to right shift (pinky)
             hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
         elif needs_shift:
-            # If shift is needed, use right shift (pinky) for the shift key
-            # But also get the finger for the actual key being pressed
-            # For shift combinations, typically use right shift
-            hand, finger = self._key_to_finger.get('SHIFT', ('right', 'pinky'))
+            # Shift rule:
+            # - If the actual key is typed with LEFT hand -> use RIGHT shift
+            # - If the actual key is typed with RIGHT hand -> use LEFT shift
+            key_hand, _key_finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+            shift_hand = 'right' if key_hand == 'left' else 'left'
+            hand, finger = (shift_hand, 'pinky')
         else:
             # Regular key - get finger mapping
             hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
@@ -254,32 +253,139 @@ class MainWindow(QMainWindow):
         
         return (english_name, tamil_name)
 
+    def _shift_side_for_key(self, key_label: str) -> str:
+        """Return which Shift side to use for a given key label ('left' or 'right')."""
+        key_hand, _ = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+        return 'right' if key_hand == 'left' else 'left'
+
     def _get_theme_colors(self) -> dict:
         """Get light theme color palette"""
         return {
-            'bg_main': '#f7fafc',
-            'bg_container': '#ffffff',
-            'bg_card': '#edf2f7',
-            'bg_input': '#ffffff',
-            'bg_hover': '#e2e8f0',
-            'text_primary': '#2d3748',
-            'text_secondary': '#4a5568',
-            'text_muted': '#718096',
-            'border': '#cbd5e0',
-            'border_light': '#e2e8f0',
-            'highlight': '#3182ce',
-            'highlight_bg': '#bee3f8',
-            'error': '#e53e3e',
-            'error_bg': '#fed7d7',
-            'success': '#38a169',
-            'success_bg': '#c6f6d5',
-            'progress': '#3182ce',
-            'key_bg': '#edf2f7',
-            'key_highlight': '#3182ce',
-            'key_highlight_bg': '#bee3f8',
-            'key_shift': '#ed8936',
-            'key_shift_bg': '#feebc8',
+            # Background: neutral light grey with soft teal tint
+            'bg_main': '#EEF6F6',
+            'bg_container': 'rgba(255, 255, 255, 0.34)',
+            'bg_card': 'rgba(255, 255, 255, 0.24)',
+            'bg_input': 'rgba(255, 255, 255, 0.38)',
+            'bg_hover': 'rgba(255, 255, 255, 0.46)',
+
+            # Typing text: dark neutral
+            'text_primary': '#1F2933',
+            'text_secondary': '#334155',
+            'text_muted': '#64748B',
+
+            'border': 'rgba(15, 23, 42, 0.14)',
+            'border_light': 'rgba(15, 23, 42, 0.10)',
+
+            # Active character: accent (teal)
+            'highlight': '#0F766E',
+            'highlight_bg': 'rgba(15, 118, 110, 0.18)',
+
+            'error': '#D64545',
+            'error_bg': 'rgba(214, 69, 69, 0.18)',
+            'success': '#2F855A',
+            'success_bg': 'rgba(47, 133, 90, 0.18)',
+            'progress': '#0F766E',
+
+            # Kept for compatibility with older styles
+            'key_bg': 'rgba(255, 255, 255, 0.22)',
+            'key_highlight': '#0F766E',
+            'key_highlight_bg': 'rgba(15, 118, 110, 0.18)',
+            'key_shift': '#0F766E',
+            'key_shift_bg': 'rgba(15, 118, 110, 0.18)',
         }
+
+    def _get_finger_colors(self) -> dict[tuple[str, str], str]:
+        """Finger color palette (hand, finger) -> hex color."""
+        return {
+            ('left', 'pinky'): '#5C96EB',
+            ('left', 'ring'): '#EF6060',
+            ('left', 'middle'): '#2ECC71',
+            ('left', 'index'): '#7A5CEB',
+            ('left', 'thumb'): '#EB78D2',
+            ('right', 'pinky'): '#5C96EB',
+            ('right', 'ring'): '#EF6060',
+            ('right', 'middle'): '#2ECC71',
+            ('right', 'index'): '#FF953D',
+            ('right', 'thumb'): '#EB78D2',
+        }
+
+    def _darken_hex_color(self, hex_color: str, factor: float) -> str:
+        """Darken a hex color by multiplying RGB by factor (0..1)."""
+        try:
+            c = hex_color.strip()
+            if not c.startswith("#"):
+                return hex_color
+            if len(c) != 7:
+                return hex_color
+            factor = max(0.0, min(1.0, factor))
+            r = int(c[1:3], 16)
+            g = int(c[3:5], 16)
+            b = int(c[5:7], 16)
+            r = max(0, min(255, int(r * factor)))
+            g = max(0, min(255, int(g * factor)))
+            b = max(0, min(255, int(b * factor)))
+            return f"#{r:02X}{g:02X}{b:02X}"
+        except Exception:
+            return hex_color
+
+    def _blend_hex_colors(self, a: str, b: str, t: float) -> str:
+        """Blend two #RRGGBB colors. t=0 -> a, t=1 -> b."""
+        try:
+            a = a.strip()
+            b = b.strip()
+            if not (a.startswith("#") and b.startswith("#") and len(a) == 7 and len(b) == 7):
+                return a
+            t = max(0.0, min(1.0, float(t)))
+            ar, ag, ab = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
+            br, bg, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
+            r = int(ar + (br - ar) * t)
+            g = int(ag + (bg - ag) * t)
+            bl = int(ab + (bb - ab) * t)
+            return f"#{r:02X}{g:02X}{bl:02X}"
+        except Exception:
+            return a
+
+    def _finger_color_for_key(self, key_label: str) -> str:
+        """Return background color for a given key label."""
+        hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
+        return self._get_finger_colors().get((hand, finger), '#5C96EB')
+
+    def _muted_key_fill_color_for_key(self, key_label: str) -> str:
+        """Muted/pastel version of the finger color for this key."""
+        colors = self._get_theme_colors()
+        base = self._finger_color_for_key(key_label)
+        # Blend towards window background to mute the color
+        return self._blend_hex_colors(base, colors['bg_main'], 0.62)
+
+    def _highlight_border_color_for_key(self, key_label: str) -> str:
+        """Border color for highlight that matches the finger palette (darker shade)."""
+        base = self._finger_color_for_key(key_label)
+        return self._darken_hex_color(base, 0.45)
+
+    def _build_key_style(
+        self,
+        key_label: str,
+        font_px: int,
+        *,
+        border_px: int = 4,
+        border_color: str = "transparent",
+        font_weight: int = 500,
+    ) -> str:
+        colors = self._get_theme_colors()
+        bg = self._muted_key_fill_color_for_key(key_label)
+        border = f"{border_px}px solid {border_color}" if border_px > 0 else "none"
+        return f"""
+            QLabel {{
+                background: {bg};
+                color: {colors['text_primary']};
+                border: {border};
+                border-radius: 6px;
+                padding: 12px 8px;
+                font-family: '{QApplication.font().family()}', sans-serif;
+                font-size: {font_px}px;
+                font-weight: {font_weight};
+            }}
+        """
 
     def _calculate_keyboard_dimensions(self) -> tuple[float, int, int]:
         """Calculate keyboard aspect ratio and optimal size based on screen size.
@@ -316,18 +422,57 @@ class MainWindow(QMainWindow):
         return (reference_ratio, min_width, min_height)
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("எழுத்தாளி - தமிழ்99 பயிற்சி")
+        self.setWindowTitle("தட்டான் - தமிழ்99 பயிற்சி")
         self.setMinimumSize(1200, 800)
         
         colors = self._get_theme_colors()
         
+        # Set fallback background color
         self.setStyleSheet(f"""
             QMainWindow {{ 
                 background: {colors['bg_main']};
             }}
         """)
-
+        
+        # Setup background SVG
+        background_svg_path = Path(__file__).parent.parent / "assets" / "background.svg"
+        if background_svg_path.exists():
+            self._background_svg_path = background_svg_path
+            self._background_svg_renderer = QSvgRenderer(str(background_svg_path))
+        
         root = QWidget()
+        
+        # Create background label for SVG (as child of main window to cover entire window)
+        if self._background_svg_renderer:
+            self._background_label = QLabel(self)
+            self._background_label.setAlignment(Qt.AlignCenter)
+            self._background_label.lower()  # Put it behind everything
+            self._background_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # Allow clicks to pass through
+            # During interactive resize, allow cheap scaling of last pixmap;
+            # a debounced re-render will refresh it crisply.
+            self._background_label.setScaledContents(True)
+
+            # Debounce expensive SVG->pixmap renders on resize
+            self._background_update_timer = QTimer(self)
+            self._background_update_timer.setSingleShot(True)
+            self._background_update_timer.timeout.connect(self._update_background)
+
+        # Create invalid input overlay (as child of main window to cover entire window)
+        self._error_overlay = QWidget(self)
+        self._error_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._error_overlay.setStyleSheet("background-color: #EF6060;")
+        self._error_overlay_effect = QGraphicsOpacityEffect(self._error_overlay)
+        self._error_overlay_effect.setOpacity(0.0)
+        self._error_overlay.setGraphicsEffect(self._error_overlay_effect)
+        self._error_overlay.hide()
+        # Create the animation ONCE and reuse it (prevents accumulating children)
+        self._error_overlay_anim = QPropertyAnimation(self._error_overlay_effect, b"opacity", self)
+        self._error_overlay_anim.setDuration(200)
+        self._error_overlay_anim.setKeyValueAt(0.0, 0.0)
+        self._error_overlay_anim.setKeyValueAt(0.2, 0.28)
+        self._error_overlay_anim.setKeyValueAt(1.0, 0.0)
+        self._error_overlay_anim.finished.connect(self._error_overlay.hide)
+        
         layout = QVBoxLayout(root)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(20)
@@ -449,7 +594,7 @@ class MainWindow(QMainWindow):
         """)
         left_panel.addWidget(self.level_status)
 
-        self.reset_button = QPushButton("🔄 முன்னேற்றத்தை மீட்டமை")
+        self.reset_button = QPushButton("↻ மீட்டமை")
         self.reset_button.setStyleSheet(f"""
             QPushButton {{
                 background: {colors['bg_container']};
@@ -501,7 +646,7 @@ class MainWindow(QMainWindow):
             padding: 24px 28px;
             font-size: 26px;
             font-weight: 400;
-            font-family: '{self._marutham_font_family}', sans-serif;
+            font-family: '{QApplication.font().family()}', sans-serif;
             min-height: 100px;
         """)
         self.task_display.setMinimumHeight(100)
@@ -532,7 +677,7 @@ class MainWindow(QMainWindow):
                 padding: 24px 28px;
                 font-size: 26px;
                 font-weight: 400;
-                font-family: '{self._marutham_font_family}', sans-serif;
+                font-family: '{QApplication.font().family()}', sans-serif;
             }}
             QLineEdit:focus {{
                 border: 2px solid {colors['highlight']};
@@ -587,7 +732,7 @@ class MainWindow(QMainWindow):
         # Single parent container for Finger UI and Keyboard
         self._bottom_container = QWidget()
         self._bottom_container.setStyleSheet(f"""
-            background: {colors['bg_container']};
+            background: transparent;
             border-radius: 16px;
             padding: 20px;
         """)
@@ -609,13 +754,13 @@ class MainWindow(QMainWindow):
         self._finger_guidance_label.setTextFormat(Qt.RichText)
         self._finger_guidance_label.setStyleSheet(f"""
             QLabel {{
-                background: {colors['bg_card']};
+                background: transparent;
                 color: {colors['text_primary']};
                 border-radius: 10px;
                 padding: 12px 16px;
                 font-size: 16px;
                 font-weight: 600;
-                font-family: '{self._marutham_font_family}', sans-serif;
+                font-family: '{QApplication.font().family()}', sans-serif;
                 min-height: 50px;
             }}
         """)
@@ -665,6 +810,10 @@ class MainWindow(QMainWindow):
         self._bottom_container.installEventFilter(self)
         
         self.setCentralWidget(root)
+        
+        # Update background after window is set up
+        self._update_background()
+        self._update_error_overlay_geometry()
 
         self.start_shortcut = QShortcut(Qt.CTRL | Qt.Key_Return, self)
         self.start_shortcut.activated.connect(self._submit_task)
@@ -839,6 +988,8 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         """Handle window resize to adjust keyboard and finger UI"""
         super().resizeEvent(event)
+        self._schedule_background_update()
+        self._update_error_overlay_geometry()
         QTimer.singleShot(10, self._adjust_adaptive_layout)  # Delay to ensure size is updated
     
     def _adjust_adaptive_layout(self) -> None:
@@ -933,37 +1084,15 @@ class MainWindow(QMainWindow):
             # Update Space key
             if "Space" in self._key_labels:
                 space_label = self._key_labels["Space"]
-                key_style = f"""
-                    QLabel {{
-                        background: {colors['key_bg']};
-                        color: {colors['text_primary']};
-                        border: none;
-                        border-radius: 6px;
-                        padding: 12px 8px;
-                        font-family: '{self._marutham_font_family}', sans-serif;
-                        font-size: {special_font}px;
-                        font-weight: 400;
-                        color: {colors['text_muted']};
-                    }}
-                """
-                space_label.setStyleSheet(key_style)
+                style = self._build_key_style("Space", special_font, font_weight=500)
+                space_label.setStyleSheet(style)
+                self._key_base_style_by_label[space_label] = style
             
             # Update shift labels
             for shift_label in self._shift_labels:
-                key_style = f"""
-                    QLabel {{
-                        background: {colors['key_bg']};
-                        color: {colors['text_primary']};
-                        border: none;
-                        border-radius: 6px;
-                        padding: 12px 8px;
-                        font-family: '{self._marutham_font_family}', sans-serif;
-                        font-size: {special_font}px;
-                        font-weight: 400;
-                        color: {colors['text_muted']};
-                    }}
-                """
-                shift_label.setStyleSheet(key_style)
+                style = self._build_key_style("Shift", special_font, font_weight=500)
+                shift_label.setStyleSheet(style)
+                self._key_base_style_by_label[shift_label] = style
     
     def _on_key_press(self, event: QKeyEvent) -> bool:
         """Handle individual key press events"""
@@ -1024,11 +1153,37 @@ class MainWindow(QMainWindow):
             self._input_has_error = True
             self._set_input_error_state(True)
             self._update_display_from_keystrokes()
+            self._flash_invalid_input_overlay()
         
         self._update_keyboard_hint()
         self._update_stats_from_tracker()
         
         return True
+
+    def _update_error_overlay_geometry(self) -> None:
+        if not self._error_overlay:
+            return
+        s = self.size()
+        self._error_overlay.setGeometry(0, 0, s.width(), s.height())
+
+    def _flash_invalid_input_overlay(self, duration_ms: int = 200) -> None:
+        """Flash a short red overlay on invalid input."""
+        if not self._error_overlay or not self._error_overlay_effect or not self._error_overlay_anim:
+            return
+        
+        # Stop any running animation (we reuse the same object)
+        try:
+            self._error_overlay_anim.stop()
+        except Exception:
+            pass
+
+        self._update_error_overlay_geometry()
+        self._error_overlay.show()
+        self._error_overlay.raise_()
+
+        self._error_overlay_effect.setOpacity(0.0)
+        self._error_overlay_anim.setDuration(max(50, int(duration_ms)))
+        self._error_overlay_anim.start()
     
     def _update_typed_tamil_text_from_keystrokes(self) -> None:
         """Reconstruct Tamil text from typed keystrokes"""
@@ -1253,7 +1408,7 @@ class MainWindow(QMainWindow):
         grid = QGridLayout(container)
         grid.setSpacing(8)
         # Set padding to match outer container padding for proper spacing
-        container.setStyleSheet("background: #ffffff; border-radius: 12px; padding: 0px;")
+        container.setStyleSheet("background: transparent; border-radius: 12px; padding: 0px;")
 
         colors = self._get_theme_colors()
         
@@ -1278,19 +1433,6 @@ class MainWindow(QMainWindow):
             'special': max(10, int(base_font_size * 0.78))
         }
         
-        key_style = f"""
-            QLabel {{
-                background: {colors['key_bg']};
-                color: {colors['text_primary']};
-                border: none;
-                border-radius: 6px;
-                padding: 12px 8px;
-                font-family: '{self._marutham_font_family}', sans-serif;
-                font-size: {base_font_size}px;
-                font-weight: 400;
-            }}
-        """
-
         size_map = {
             "Backspace": 2.0,
             "Tab": 1.75,
@@ -1344,6 +1486,7 @@ class MainWindow(QMainWindow):
         for row_index, row in enumerate(rows):
             col = 0
             for key, size in row:
+                start_col = col
                 span = int(size * unit_scale)
                 if key is None:
                     col += span
@@ -1360,38 +1503,42 @@ class MainWindow(QMainWindow):
                 
                 # Log each key size
                 logging.info(f"Key: {key}, Size: {size}, Width: {key_width}px, Height: {key_height}px")
-                
-                label.setStyleSheet(key_style)
+
                 label.setMinimumHeight(key_height)
                 # Don't set fixed minimum width - let grid handle it with stretch factors
                 # This allows keys to scale down when space is limited
                 label.setMinimumWidth(0)
-                colors = self._get_theme_colors()
+
                 if key in special_labels:
                     label.setText(html.escape(special_labels[key]))
-                    label.setStyleSheet(key_style + f"QLabel {{ font-family: '{self._marutham_font_family}', sans-serif; font-size: {special_font}px; color: {colors['text_muted']}; }}")
+                    style = self._build_key_style(key, special_font, font_weight=500)
+                    label.setStyleSheet(style)
+                    self._key_base_style_by_label[label] = style
                 else:
                     english = html.escape(key)
                     tamil_base = html.escape(display[0]) if display[0] else ""
                     tamil_shift = html.escape(display[1]) if display[1] else ""
+                    style = self._build_key_style(key, base_font_size, font_weight=500)
+                    label.setStyleSheet(style)
+                    self._key_base_style_by_label[label] = style
                     label.setText(
                         '<table width="100%" height="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
                             '<tr>'
                                 f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
-                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
-                                f'font-size:{english_font}px; color:{colors["text_muted"]}; ">{english}</td>'
+                                f'font-family:\'{QApplication.font().family()}\', sans-serif; '
+                                f'font-size:{english_font}px; color:{colors["text_primary"]}; ">{english}</td>'
 
                                 '<td style="width:5px;"></td>'
 
                                 f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
-                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
-                                f'font-size:{tamil_shift_font}px; color:{colors["text_muted"]}; ">{tamil_shift}</td>'
+                                f'font-family:\'{QApplication.font().family()}\', sans-serif; '
+                                f'font-size:{tamil_shift_font}px; color:{colors["text_primary"]}; ">{tamil_shift}</td>'
                             '</tr>'
 
                             '<tr>'
                                 f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
-                                f'font-family:\'{self._marutham_font_family}\', sans-serif; '
-                                f'font-size:{tamil_base_font}px; font-weight:600; ">{tamil_base}</td>'
+                                f'font-family:\'{QApplication.font().family()}\', sans-serif; '
+                                f'font-size:{tamil_base_font}px; font-weight:600; color:{colors["text_primary"]}; ">{tamil_base}</td>'
                             '</tr>'
                         '</table>'
                     )
@@ -1405,6 +1552,11 @@ class MainWindow(QMainWindow):
                     self._key_labels[key.upper()] = label
                 if key == "Shift":
                     self._shift_labels.append(label)
+                    # Identify left vs right shift by position (row 3 has two Shift keys)
+                    if row_index == 3 and start_col == 0:
+                        self._left_shift_label = label
+                    elif row_index == 3:
+                        self._right_shift_label = label
 
         max_columns = max(sum(int(size * unit_scale) for _, size in row) for row in rows)
         for column in range(max_columns):
@@ -1450,66 +1602,33 @@ class MainWindow(QMainWindow):
                 '<table width="100%" height="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
                     '<tr>'
                         f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
-                        f'font-family:\'{self._marutham_font_family}\', sans-serif; '
-                        f'font-size:{english_font}px; color:{colors["text_muted"]}; ">{english}</td>'
+                        f'font-family:\'{QApplication.font().family()}\', sans-serif; '
+                        f'font-size:{english_font}px; color:{colors["text_primary"]}; ">{english}</td>'
                         '<td style="width:5px;"></td>'
                         f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
-                        f'font-family:\'{self._marutham_font_family}\', sans-serif; '
-                        f'font-size:{tamil_shift_font}px; color:{colors["text_muted"]}; ">{tamil_shift}</td>'
+                        f'font-family:\'{QApplication.font().family()}\', sans-serif; '
+                        f'font-size:{tamil_shift_font}px; color:{colors["text_primary"]}; ">{tamil_shift}</td>'
                     '</tr>'
                     '<tr>'
                         f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
-                        f'font-family:\'{self._marutham_font_family}\', sans-serif; '
-                        f'font-size:{tamil_base_font}px; font-weight:600; ">{tamil_base}</td>'
+                        f'font-family:\'{QApplication.font().family()}\', sans-serif; '
+                        f'font-size:{tamil_base_font}px; font-weight:600; color:{colors["text_primary"]}; ">{tamil_base}</td>'
                     '</tr>'
                 '</table>'
             )
 
     def _clear_keyboard_highlight(self) -> None:
-        colors = self._get_theme_colors()
         for label in self._highlighted_keys:
-            label.setStyleSheet(f"""
-                QLabel {{
-                    background: {colors['key_bg']};
-                    color: {colors['text_primary']};
-                    border: none;
-                    border-radius: 6px;
-                    padding: 12px 8px;
-                    font-family: '{self._marutham_font_family}', sans-serif;
-                    font-size: 18px;
-                    font-weight: 400;
-                }}
-            """)
+            base_style = self._key_base_style_by_label.get(label)
+            if base_style:
+                label.setStyleSheet(base_style)
         self._highlighted_keys = []
 
     def _highlight_key(self, label: QLabel, key_label: str = "", is_shift: bool = False) -> None:
-        colors = self._get_theme_colors()
-        if is_shift:
-            style = f"""
-                QLabel {{
-                    background: {colors['key_shift_bg']};
-                    color: {colors['text_primary']};
-                    border: 2px solid {colors['key_shift']};
-                    border-radius: 6px;
-                    padding: 12px 8px;
-                    font-family: '{self._marutham_font_family}', sans-serif;
-                    font-size: 18px;
-                    font-weight: 500;
-                }}
-            """
-        else:
-            style = f"""
-                QLabel {{
-                    background: {colors['key_highlight_bg']};
-                    color: {colors['text_primary']};
-                    border: 2px solid {colors['key_highlight']};
-                    border-radius: 6px;
-                    padding: 12px 8px;
-                    font-family: '{self._marutham_font_family}', sans-serif;
-                    font-size: 18px;
-                    font-weight: 500;
-                }}
-            """
+        font_px = self._keyboard_font_sizes.get('special', 18) if (is_shift or key_label in {"Shift", "Space", "Backspace", "Tab", "Caps", "Enter", "Ctrl", "Alt"}) else self._keyboard_font_sizes.get('base', 18)
+        highlight_key = key_label or "Shift"
+        border_color = self._highlight_border_color_for_key(highlight_key)
+        style = self._build_key_style(highlight_key, font_px, border_px=4, border_color=border_color, font_weight=500)
         label.setStyleSheet(style)
         self._highlighted_keys.append(label)
 
@@ -1531,15 +1650,23 @@ class MainWindow(QMainWindow):
             if key_label in self._key_labels:
                 self._highlight_key(self._key_labels[key_label], key_label=key_label)
             if needs_shift:
-                for shift_label in self._shift_labels:
+                # Highlight the correct Shift key based on hand rule
+                side = self._shift_side_for_key(key_label)
+                shift_label = self._right_shift_label if side == 'right' else self._left_shift_label
+                if shift_label is not None:
                     self._highlight_key(shift_label, key_label="Shift", is_shift=True)
+                else:
+                    # Fallback if we couldn't identify sides
+                    for s in self._shift_labels:
+                        self._highlight_key(s, key_label="Shift", is_shift=True)
             
             # Update finger guidance label
             if self._finger_guidance_label:
                 english_finger, tamil_finger = self._get_finger_name(key_label, needs_shift)
                 # Format: "Use Left Thumb / இடது கட்டைவிரல்"
                 if needs_shift:
-                    guidance_text = f"<div style='text-align: center;'>Hold Shift<br/>{english_finger}<br/>{tamil_finger}</div>"
+                    shift_side = self._shift_side_for_key(key_label)
+                    guidance_text = f"<div style='text-align: center;'>Hold {shift_side.capitalize()} Shift<br/>{english_finger}<br/>{tamil_finger}</div>"
                 else:
                     guidance_text = f"<div style='text-align: center;'>Use {english_finger}<br/>{tamil_finger}</div>"
                 self._finger_guidance_label.setText(guidance_text)
@@ -1550,15 +1677,17 @@ class MainWindow(QMainWindow):
             if "Space" in self._key_labels:
                 space_label = self._key_labels["Space"]
                 colors = self._get_theme_colors()
+                font_px = self._keyboard_font_sizes.get('special', 18)
+                border_color = self._highlight_border_color_for_key("Space")
                 space_label.setStyleSheet(f"""
                     QLabel {{
                         background: {colors['success_bg']};
-                        color: {colors['text_primary']};
-                        border: 2px solid {colors['success']};
+                        color: #ffffff;
+                        border: 4px solid {border_color};
                         border-radius: 6px;
                         padding: 12px 8px;
-                        font-family: '{self._marutham_font_family}', sans-serif;
-                        font-size: 18px;
+                        font-family: '{QApplication.font().family()}', sans-serif;
+                        font-size: {font_px}px;
                         font-weight: 500;
                     }}
                 """)
@@ -1658,7 +1787,7 @@ class MainWindow(QMainWindow):
         return char.upper(), False
 
     def _load_tamil99_maps(self) -> tuple[dict[str, tuple[str, Optional[str]]], dict[str, str]]:
-        mapping_path = Path("/usr/share/m17n/ta-tamil99.mim")
+        mapping_path = Path(__file__).parent.parent / "data" / "m17n" / "ta-tamil99.mim"
         if not mapping_path.exists():
             return {}, {}
 
@@ -1809,9 +1938,9 @@ class MainWindow(QMainWindow):
         if not current_char and not remaining:
             html_text = f'<span style="color:{colors["success"]};">{completed_escaped}</span>'
         else:
-            current_style = f"background:{colors['highlight_bg']}; color:{colors['text_primary']}; font-weight:500; padding:2px 4px; border-radius:4px;"
+            current_style = f"background:{colors['highlight_bg']}; color:{colors['highlight']}; font-weight:600; padding:2px 4px; border-radius:4px;"
             if is_error:
-                current_style = f"background:{colors['error_bg']}; color:{colors['text_primary']}; font-weight:500; padding:2px 4px; border-radius:4px;"
+                current_style = f"background:{colors['error_bg']}; color:{colors['error']}; font-weight:600; padding:2px 4px; border-radius:4px;"
             
             html_text = (
                 f'<span style="color:{colors["success"]};">{completed_escaped}</span>'
@@ -1836,7 +1965,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: '{self._marutham_font_family}', sans-serif;
+                    font-family: '{QApplication.font().family()}', sans-serif;
                 }}
             """)
         else:
@@ -1849,7 +1978,7 @@ class MainWindow(QMainWindow):
                     padding: 24px 28px;
                     font-size: 26px;
                     font-weight: 400;
-                    font-family: '{self._marutham_font_family}', sans-serif;
+                    font-family: '{QApplication.font().family()}', sans-serif;
                 }}
                 QLineEdit:focus {{
                     border: 2px solid {colors['highlight']};
@@ -1865,13 +1994,66 @@ class MainWindow(QMainWindow):
         task_size = max(16.0, height * 0.035)
         input_size = max(15.0, height * 0.03)
 
-        task_font = QFont(self._marutham_font_family)
+        task_font = QFont(QApplication.font().family())
         task_font.setPointSizeF(task_size)
         self.task_display.setFont(task_font)
 
-        input_font = QFont(self._marutham_font_family)
+        input_font = QFont(QApplication.font().family())
         input_font.setPointSizeF(input_size)
         self.input_box.setFont(input_font)
 
         self.task_display.setMinimumHeight(int(task_size * 2.2))
         self.input_box.setMinimumHeight(int(input_size * 2.2))
+    
+    def _update_background(self) -> None:
+        """Update the background SVG to fit the window size"""
+        if not self._background_label or not self._background_svg_renderer:
+            return
+        
+        # Get window size
+        size = self.size()
+        if size.width() <= 0 or size.height() <= 0:
+            return
+
+        dpr = float(self.devicePixelRatioF())
+        render_key = (size.width(), size.height(), dpr)
+        if self._background_last_render_key == render_key:
+            # Avoid redundant renders while resizing
+            return
+        
+        # Create pixmap at window size (device pixels for crisp rendering)
+        pixmap = QPixmap(int(size.width() * dpr), int(size.height() * dpr))
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(Qt.transparent)
+        
+        # Render SVG scaled to match window size exactly
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Scale SVG to match window dimensions exactly
+        svg_size = self._background_svg_renderer.defaultSize()
+        if svg_size.width() > 0 and svg_size.height() > 0:
+            scale_x = size.width() / svg_size.width()
+            scale_y = size.height() / svg_size.height()
+            
+            # Scale to match window size exactly (stretches if aspect ratios differ)
+            painter.scale(scale_x, scale_y)
+            self._background_svg_renderer.render(painter)
+        
+        painter.end()
+        
+        # Set pixmap to background label
+        self._background_label.setPixmap(pixmap)
+        self._background_label.setGeometry(0, 0, size.width(), size.height())
+        self._background_last_render_key = render_key
+
+    def _schedule_background_update(self, debounce_ms: int = 50) -> None:
+        """Debounce background renders during interactive resize."""
+        if not self._background_label or not self._background_svg_renderer:
+            return
+        if self._background_update_timer is None:
+            self._update_background()
+            return
+        # Restart timer (cancels previous pending update)
+        self._background_update_timer.stop()
+        self._background_update_timer.start(max(0, int(debounce_ms)))
