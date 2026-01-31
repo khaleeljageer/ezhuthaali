@@ -18,26 +18,28 @@ A Tamil99 typing practice application built with Python + PySide6. Designed as a
 - **Progress Saving**: User progress is automatically saved (`~/.ezhuthaali/progress.json`)
 
 ### 🎨 User Interface
-- **Light Theme**: Modern, clean light theme
+- **Calm Light Theme**: Neutral background with a soft teal accent
 - **Responsive Design**: Screen size-based font scaling
 - **Adaptive Layout**: Keyboard and finger UI automatically adjust to window size, preventing cropping
 - **Keyboard Display**: On-screen keyboard display with next key highlighting
-- **Finger Guidance**: Visual finger placement guide showing which finger to use for each key
-- **Word-by-Word Scrolling**: Scrolling word-by-word for long lines
-- **Dynamic Resizing**: Layout adapts in real-time when window is resized
+- **Finger Guidance**: Visual finger placement guide showing which finger/hand to use for each key (opposite-hand Shift guidance)
+- **Background Artwork**: Window background is rendered from `ezhuthaali/assets/background.svg`
+- **Error Flash**: Brief red overlay flash on invalid input (~200ms)
+- **Dynamic Resizing**: Layout adapts in real-time when window is resized (background SVG rendering is debounced for performance)
+- **Finger Color Keyboard**: Keys are filled with muted/pastel finger colors; text uses a dark neutral for readability
 
 ## Installation
 
 ### Requirements
 - Python 3.8 or higher
-- PySide6
+- PySide6 (Qt for Python)
 
 ### Installation Steps
 
 ```bash
 # 1. Clone the repository
 git clone <repository-url>
-cd ezhuthaali
+cd thattachu
 
 # 2. Create virtual environment
 python -m venv .venv
@@ -52,7 +54,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 5. Run the application
-python app.py
+python -m ezhuthaali
 ```
 
 ## Usage
@@ -104,8 +106,7 @@ This application uses the Tamil99 keyboard layout. All key mappings are embedded
 
 ### Structure
 ```
-ezhuthaali/
-├── app.py                 # Application entry point
+thattachu/
 ├── ezhuthaali/
 │   ├── core/
 │   │   ├── levels.py      # Level management
@@ -116,6 +117,7 @@ ezhuthaali/
 │   │   └── main_window.py # Main UI
 │   └── data/
 │       └── levels/        # Practice level files
+│   └── assets/            # UI assets (background.svg, hands.png, TAU-Marutham.ttf)
 └── requirements.txt
 ```
 
