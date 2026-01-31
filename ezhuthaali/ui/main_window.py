@@ -260,28 +260,37 @@ class MainWindow(QMainWindow):
     def _get_theme_colors(self) -> dict:
         """Get light theme color palette"""
         return {
-            'bg_main': '#f7fafc',
-            'bg_container': '#ffffff',
-            'bg_card': '#edf2f7',
-            'bg_input': '#ffffff',
-            'bg_hover': '#e2e8f0',
-            'text_primary': '#2d3748',
-            'text_secondary': '#4a5568',
-            'text_muted': '#718096',
-            'border': '#cbd5e0',
-            'border_light': '#e2e8f0',
-            'highlight': '#3182ce',
-            'highlight_bg': '#bee3f8',
-            'error': '#e53e3e',
-            'error_bg': '#fed7d7',
-            'success': '#38a169',
-            'success_bg': '#EB78D2',
-            'progress': '#3182ce',
-            'key_bg': '#edf2f7',
-            'key_highlight': '#3182ce',
-            'key_highlight_bg': '#bee3f8',
-            'key_shift': '#ed8936',
-            'key_shift_bg': '#feebc8',
+            # Background: neutral light grey with soft teal tint
+            'bg_main': '#EEF6F6',
+            'bg_container': 'rgba(255, 255, 255, 0.34)',
+            'bg_card': 'rgba(255, 255, 255, 0.24)',
+            'bg_input': 'rgba(255, 255, 255, 0.38)',
+            'bg_hover': 'rgba(255, 255, 255, 0.46)',
+
+            # Typing text: dark neutral
+            'text_primary': '#1F2933',
+            'text_secondary': '#334155',
+            'text_muted': '#64748B',
+
+            'border': 'rgba(15, 23, 42, 0.14)',
+            'border_light': 'rgba(15, 23, 42, 0.10)',
+
+            # Active character: accent (teal)
+            'highlight': '#0F766E',
+            'highlight_bg': 'rgba(15, 118, 110, 0.18)',
+
+            'error': '#D64545',
+            'error_bg': 'rgba(214, 69, 69, 0.18)',
+            'success': '#2F855A',
+            'success_bg': 'rgba(47, 133, 90, 0.18)',
+            'progress': '#0F766E',
+
+            # Kept for compatibility with older styles
+            'key_bg': 'rgba(255, 255, 255, 0.22)',
+            'key_highlight': '#0F766E',
+            'key_highlight_bg': 'rgba(15, 118, 110, 0.18)',
+            'key_shift': '#0F766E',
+            'key_shift_bg': 'rgba(15, 118, 110, 0.18)',
         }
 
     def _get_finger_colors(self) -> dict[tuple[str, str], str]:
@@ -318,10 +327,34 @@ class MainWindow(QMainWindow):
         except Exception:
             return hex_color
 
+    def _blend_hex_colors(self, a: str, b: str, t: float) -> str:
+        """Blend two #RRGGBB colors. t=0 -> a, t=1 -> b."""
+        try:
+            a = a.strip()
+            b = b.strip()
+            if not (a.startswith("#") and b.startswith("#") and len(a) == 7 and len(b) == 7):
+                return a
+            t = max(0.0, min(1.0, float(t)))
+            ar, ag, ab = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
+            br, bg, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
+            r = int(ar + (br - ar) * t)
+            g = int(ag + (bg - ag) * t)
+            bl = int(ab + (bb - ab) * t)
+            return f"#{r:02X}{g:02X}{bl:02X}"
+        except Exception:
+            return a
+
     def _finger_color_for_key(self, key_label: str) -> str:
         """Return background color for a given key label."""
         hand, finger = self._key_to_finger.get(key_label.upper(), ('right', 'index'))
         return self._get_finger_colors().get((hand, finger), '#5C96EB')
+
+    def _muted_key_fill_color_for_key(self, key_label: str) -> str:
+        """Muted/pastel version of the finger color for this key."""
+        colors = self._get_theme_colors()
+        base = self._finger_color_for_key(key_label)
+        # Blend towards window background to mute the color
+        return self._blend_hex_colors(base, colors['bg_main'], 0.62)
 
     def _highlight_border_color_for_key(self, key_label: str) -> str:
         """Border color for highlight that matches the finger palette (darker shade)."""
@@ -337,12 +370,13 @@ class MainWindow(QMainWindow):
         border_color: str = "transparent",
         font_weight: int = 500,
     ) -> str:
-        bg = self._finger_color_for_key(key_label)
+        colors = self._get_theme_colors()
+        bg = self._muted_key_fill_color_for_key(key_label)
         border = f"{border_px}px solid {border_color}" if border_px > 0 else "none"
         return f"""
             QLabel {{
                 background: {bg};
-                color: #ffffff;
+                color: {colors['text_primary']};
                 border: {border};
                 border-radius: 6px;
                 padding: 12px 8px;
@@ -387,7 +421,7 @@ class MainWindow(QMainWindow):
         return (reference_ratio, min_width, min_height)
 
     def _build_ui(self) -> None:
-        self.setWindowTitle("எழுத்தாளி - தமிழ்99 பயிற்சி")
+        self.setWindowTitle("தட்டான் - தமிழ்99 பயிற்சி")
         self.setMinimumSize(1200, 800)
         
         colors = self._get_theme_colors()
@@ -1488,19 +1522,19 @@ class MainWindow(QMainWindow):
                             '<tr>'
                                 f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
                                 f'font-family:\'{QApplication.font().family()}\', sans-serif; '
-                                f'font-size:{english_font}px; color:#ffffff; ">{english}</td>'
+                                f'font-size:{english_font}px; color:{colors["text_primary"]}; ">{english}</td>'
 
                                 '<td style="width:5px;"></td>'
 
                                 f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
                                 f'font-family:\'{QApplication.font().family()}\', sans-serif; '
-                                f'font-size:{tamil_shift_font}px; color:#ffffff; ">{tamil_shift}</td>'
+                                f'font-size:{tamil_shift_font}px; color:{colors["text_primary"]}; ">{tamil_shift}</td>'
                             '</tr>'
 
                             '<tr>'
                                 f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
                                 f'font-family:\'{QApplication.font().family()}\', sans-serif; '
-                                f'font-size:{tamil_base_font}px; font-weight:600; color:#ffffff; ">{tamil_base}</td>'
+                                f'font-size:{tamil_base_font}px; font-weight:600; color:{colors["text_primary"]}; ">{tamil_base}</td>'
                             '</tr>'
                         '</table>'
                     )
@@ -1565,16 +1599,16 @@ class MainWindow(QMainWindow):
                     '<tr>'
                         f'<td style="padding-right:3px; vertical-align:top; text-align:left; '
                         f'font-family:\'{QApplication.font().family()}\', sans-serif; '
-                        f'font-size:{english_font}px; color:#ffffff; ">{english}</td>'
+                        f'font-size:{english_font}px; color:{colors["text_primary"]}; ">{english}</td>'
                         '<td style="width:5px;"></td>'
                         f'<td style="padding-left:3px; vertical-align:top; text-align:right; '
                         f'font-family:\'{QApplication.font().family()}\', sans-serif; '
-                        f'font-size:{tamil_shift_font}px; color:#ffffff; ">{tamil_shift}</td>'
+                        f'font-size:{tamil_shift_font}px; color:{colors["text_primary"]}; ">{tamil_shift}</td>'
                     '</tr>'
                     '<tr>'
                         f'<td colspan="3" style="vertical-align:bottom; text-align:left; '
                         f'font-family:\'{QApplication.font().family()}\', sans-serif; '
-                        f'font-size:{tamil_base_font}px; font-weight:600; color:#ffffff; ">{tamil_base}</td>'
+                        f'font-size:{tamil_base_font}px; font-weight:600; color:{colors["text_primary"]}; ">{tamil_base}</td>'
                     '</tr>'
                 '</table>'
             )
@@ -1900,9 +1934,9 @@ class MainWindow(QMainWindow):
         if not current_char and not remaining:
             html_text = f'<span style="color:{colors["success"]};">{completed_escaped}</span>'
         else:
-            current_style = f"background:{colors['highlight_bg']}; color:{colors['text_primary']}; font-weight:500; padding:2px 4px; border-radius:4px;"
+            current_style = f"background:{colors['highlight_bg']}; color:{colors['highlight']}; font-weight:600; padding:2px 4px; border-radius:4px;"
             if is_error:
-                current_style = f"background:{colors['error_bg']}; color:{colors['text_primary']}; font-weight:500; padding:2px 4px; border-radius:4px;"
+                current_style = f"background:{colors['error_bg']}; color:{colors['error']}; font-weight:600; padding:2px 4px; border-radius:4px;"
             
             html_text = (
                 f'<span style="color:{colors["success"]};">{completed_escaped}</span>'
