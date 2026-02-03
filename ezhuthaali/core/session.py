@@ -25,8 +25,16 @@ class TypingSession:
         return self._index
 
     @property
+    def start_time(self) -> float:
+        return self._start_time
+
+    @property
     def total_tasks(self) -> int:
         return len(self._tasks)
+
+    @property
+    def total_correct(self) -> int:
+        return self._total_correct
 
     def current_task(self) -> str:
         return self._tasks[self._index]

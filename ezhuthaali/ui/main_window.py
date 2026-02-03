@@ -5,6 +5,7 @@ import html
 import re
 import os
 import logging
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -144,6 +145,12 @@ class HomeColors:
     TEXT_SECONDARY = "#4a6572"
     TEXT_MUTED = "#78909c"
 
+    # Progress card (முன்னேற்றம்) – light glass bar
+    PROGRESS_CARD_BG = "#f8fcfd"
+    PROGRESS_TRACK = "#e6f0f0"
+    PROGRESS_FILL = "#107878"
+    PROGRESS_LABEL_MUTED = "#648282"
+
 
 class CoolBackground(QWidget):
     """Gradient background with subtle decorative shapes (light theme)."""
@@ -200,13 +207,22 @@ class CoolBackground(QWidget):
 class HomeProgressBar(QWidget):
     """Rounded gradient progress bar (ported from `test.py`)."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        *,
+        track_color: Optional[str] = None,
+        show_percentage: bool = False,
+        height: int = 10,
+    ) -> None:
         super().__init__(parent)
         self._value = 0
         self._max_value = 100
         self._color_start = HomeColors.PRIMARY_LIGHT
         self._color_end = HomeColors.PRIMARY
-        self.setFixedHeight(10)
+        self._track_color = track_color  # None = default dark translucent
+        self._show_percentage = show_percentage
+        self.setFixedHeight(height)
         self.setMinimumWidth(100)
 
     def set_progress(self, value: int, max_value: int, color_start: Optional[str] = None, color_end: Optional[str] = None) -> None:
@@ -221,23 +237,117 @@ class HomeProgressBar(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-        painter.setBrush(QColor(0, 0, 0, 25))
+        # Track
+        if self._track_color:
+            painter.setBrush(QColor(self._track_color))
+        else:
+            painter.setBrush(QColor(0, 0, 0, 25))
         painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(0, 0, self.width(), self.height(), 5, 5)
+        radius = min(8, self.height() // 2)
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), radius, radius)
 
         progress_width = int((self._value / self._max_value) * self.width()) if self._max_value else 0
-        if progress_width <= 0:
-            return
+        if progress_width > 0:
+            gradient = QLinearGradient(0, 0, progress_width, 0)
+            gradient.setColorAt(0, QColor(self._color_start))
+            gradient.setColorAt(1, QColor(self._color_end))
+            painter.setBrush(gradient)
+            painter.drawRoundedRect(0, 0, progress_width, self.height(), radius, radius)
 
-        gradient = QLinearGradient(0, 0, progress_width, 0)
-        gradient.setColorAt(0, QColor(self._color_start))
-        gradient.setColorAt(1, QColor(self._color_end))
-        painter.setBrush(gradient)
-        painter.drawRoundedRect(0, 0, progress_width, self.height(), 5, 5)
+            if not self._track_color:
+                painter.setBrush(QColor(255, 255, 255, 60))
+                painter.drawRoundedRect(0, 0, progress_width, max(2, self.height() // 2), radius, radius)
 
-        painter.setBrush(QColor(255, 255, 255, 60))
-        painter.drawRoundedRect(0, 0, progress_width, max(2, self.height() // 2), 5, 5)
+            # Percentage on fill (e.g. "25%")
+            if self._show_percentage and self._max_value > 0:
+                pct = round((self._value / self._max_value) * 100)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(Qt.NoBrush)
+                font = painter.font()
+                font.setPointSize(max(9, self.height() - 4))
+                font.setWeight(600)
+                painter.setFont(font)
+                painter.setPen(QColor("#ffffff"))
+                text = f"{pct}%"
+                text_rect = painter.boundingRect(0, 0, progress_width, self.height(), Qt.AlignCenter, text)
+                painter.drawText(text_rect, Qt.AlignCenter, text)
+
+
+class ProgressCard(QFrame):
+    """Progress block matching the glass UI: முன்னேற்றம் label, fraction, rounded bar with % on fill."""
+
+    def __init__(self, parent: Optional[QWidget] = None, *, embedded: bool = False) -> None:
+        super().__init__(parent)
+        self.setObjectName("progressCard")
+        if embedded:
+            self.setStyleSheet(
+                """
+                QFrame#progressCard {
+                    background: transparent;
+                    border: none;
+                    border-radius: 0;
+                }
+                """
+            )
+        else:
+            self.setStyleSheet(
+                f"""
+                QFrame#progressCard {{
+                    background: {HomeColors.PROGRESS_CARD_BG};
+                    border: 1px solid rgba(255,255,255,0.7);
+                    border-radius: 16px;
+                }}
+                """
+            )
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(20)
+            shadow.setOffset(0, 4)
+            shadow.setColor(QColor(0, 60, 80, 28))
+            self.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        self._title_label = QLabel("முன்னேற்றம்")
+        self._title_label.setStyleSheet(
+            f"color: {HomeColors.PROGRESS_LABEL_MUTED}; font-size: 13px; font-weight: 600;"
+        )
+        header.addWidget(self._title_label)
+        header.addStretch(1)
+        self._fraction_label = QLabel("0/0 (0%)")
+        self._fraction_label.setStyleSheet(
+            f"color: {HomeColors.PROGRESS_LABEL_MUTED}; font-size: 13px; font-weight: 600;"
+        )
+        header.addWidget(self._fraction_label)
+        layout.addLayout(header)
+
+        self._bar = HomeProgressBar(
+            self,
+            track_color=HomeColors.PROGRESS_TRACK,
+            show_percentage=True,
+            height=14,
+        )
+        self._bar.set_progress(0, 1, HomeColors.PROGRESS_FILL, HomeColors.PROGRESS_FILL)
+        layout.addWidget(self._bar)
+        self._bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_progress(self, current: int, total: int) -> None:
+        total = max(1, total)
+        self._bar.set_progress(current, total, HomeColors.PROGRESS_FILL, HomeColors.PROGRESS_FILL)
+        pct = round((current / total) * 100)
+        self._fraction_label.setText(f"{current}/{total} ({pct}%)")
+
+    def setRange(self, min_val: int, max_val: int) -> None:
+        self._bar._max_value = max(1, max_val)
+        self.set_progress(min_val, self._bar._max_value)
+
+    def setValue(self, value: int) -> None:
+        self.set_progress(value, self._bar._max_value)
 
 
 class GlassCard(QFrame):
@@ -809,6 +919,82 @@ class LevelMapWidget(QWidget):
             painter.drawPath(path)
 
 
+class LetterSequenceWidget(QWidget):
+    """Horizontal row of boxes: completed (✓), current (teal), upcoming (gray)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._letters: list[str] = []
+        self._current_index: int = 0
+        self.setFixedHeight(60)
+        self.setMinimumWidth(200)
+
+    def set_letters(self, letters: list[str]) -> None:
+        self._letters = list(letters)
+        self.update()
+
+    def set_current(self, index: int) -> None:
+        self._current_index = max(0, min(index, len(self._letters)))
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._letters:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        box_size = 44
+        spacing = 10
+        total_width = len(self._letters) * (box_size + spacing) - spacing
+        start_x = max(0, (self.width() - total_width) // 2)
+        y = (self.height() - box_size) // 2
+        for i, letter in enumerate(self._letters):
+            x = start_x + i * (box_size + spacing)
+            if i < self._current_index:
+                painter.setBrush(QColor("#e8f5e9"))
+                painter.setPen(QPen(QColor(HomeColors.PRIMARY), 2))
+                text_color = QColor(HomeColors.PRIMARY)
+                display = "✓"
+            elif i == self._current_index:
+                painter.setBrush(QColor("#e0f7fa"))
+                painter.setPen(QPen(QColor(HomeColors.PRIMARY), 2))
+                text_color = QColor(HomeColors.PRIMARY)
+                display = letter
+            else:
+                painter.setBrush(QColor(255, 255, 255, 100))
+                painter.setPen(QPen(QColor("#b0bec5"), 1))
+                text_color = QColor("#b0bec5")
+                display = letter
+            painter.drawRoundedRect(x, y, box_size, box_size, 10, 10)
+            painter.setPen(text_color)
+            font = painter.font()
+            font.setPointSize(16 if i == self._current_index else 14)
+            font.setBold(i == self._current_index)
+            painter.setFont(font)
+            painter.drawText(x, y, box_size, box_size, Qt.AlignCenter, display)
+
+
+class HeroLetterLabel(QLabel):
+    """Large teal circle with current character (like test.py HeroLetter)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(120, 120)
+        self.setStyleSheet(
+            f"""
+            QLabel {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {HomeColors.PRIMARY_LIGHT}, stop:1 {HomeColors.PRIMARY});
+                color: white;
+                border-radius: 60px;
+                font-size: 48px;
+                font-weight: 900;
+            }}
+            """
+        )
+
+
 class MainWindow(QMainWindow):
     def __init__(self, levels: LevelRepository, progress_store: ProgressStore) -> None:
         super().__init__()
@@ -860,6 +1046,19 @@ class MainWindow(QMainWindow):
         self._back_button: Optional[QPushButton] = None
         self._typing_title_label: Optional[QLabel] = None
 
+        # Typing screen: practice UI (letter sequence, hero, stats panel)
+        self._letter_sequence_widget: Optional[LetterSequenceWidget] = None
+        self._hero_letter_label: Optional[HeroLetterLabel] = None
+        self._typing_time_label: Optional[QLabel] = None
+        self._typing_wpm_label: Optional[QLabel] = None
+        self._typing_accuracy_bar: Optional[HomeProgressBar] = None
+        self._typing_accuracy_value: Optional[QLabel] = None
+        self._typing_streak_label: Optional[QLabel] = None
+        self._typing_best_streak_label: Optional[QLabel] = None
+        self._typing_correct_label: Optional[QLabel] = None
+        self._typing_wrong_label: Optional[QLabel] = None
+        self._typing_stats_timer: Optional[QTimer] = None
+
         # Home screen widgets
         self._header_datetime_label: Optional[QLabel] = None
         self._header_timer: Optional[QTimer] = None
@@ -902,8 +1101,7 @@ class MainWindow(QMainWindow):
             - hand: 'left' or 'right'
             - finger: 'thumb', 'index', 'middle', 'ring', 'pinky'
         """
-        mapping = {}
-        
+        mapping: dict[str, tuple[str, str]] = {}
         # Left hand - Pinky
         for key in ['`', '1', 'Q', 'A', 'Z', 'TAB', 'CAPS']:
             mapping[key.upper()] = ('left', 'pinky')
@@ -1220,7 +1418,7 @@ class MainWindow(QMainWindow):
         # ---- Multi-screen container ----
         self._stack = QStackedWidget()
         self._home_screen = CoolBackground()
-        self._typing_screen = QWidget()
+        self._typing_screen = CoolBackground()
         self._stack.addWidget(self._home_screen)
         self._stack.addWidget(self._typing_screen)
         self.setCentralWidget(self._stack)
@@ -1402,144 +1600,211 @@ class MainWindow(QMainWindow):
         )
         home_layout.addWidget(footer_tagline, 0)
 
-        # ---- Typing screen ----
+        # ---- Typing screen (header + left stats + practice area; finger/keyboard unchanged) ----
         typing_layout = QVBoxLayout(self._typing_screen)
-        typing_layout.setContentsMargins(24, 24, 24, 24)
+        typing_layout.setContentsMargins(24, 20, 24, 20)
         typing_layout.setSpacing(20)
 
-        typing_top = QHBoxLayout()
-        typing_top.setSpacing(12)
+        # Header: back + center teal pill (level name)
+        typing_header = QWidget()
+        header_row = QHBoxLayout(typing_header)
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(12)
         self._back_button = QPushButton("← நிலைகள்")
+        self._back_button.setCursor(Qt.PointingHandCursor)
+        self._back_button.setFixedHeight(48)
         self._back_button.setStyleSheet(f"""
             QPushButton {{
-                background: {colors['bg_container']};
-                color: {colors['text_secondary']};
-                padding: 10px 14px;
-                border: none;
-                border-radius: 10px;
+                background: rgba(255,255,255,0.9);
+                border: 1px solid rgba(0,131,143,0.2);
+                border-radius: 12px;
+                color: {HomeColors.PRIMARY};
+                font-size: 14px;
                 font-weight: 600;
-                font-size: 13px;
+                padding: 0 24px;
             }}
-            QPushButton:hover {{
-                background: {colors['bg_hover']};
-            }}
+            QPushButton:hover {{ background: white; border-color: {HomeColors.PRIMARY}; }}
         """)
         self._back_button.clicked.connect(self._show_home_screen)
-        typing_top.addWidget(self._back_button, 0)
-
-        self._typing_title_label = QLabel("")
-        self._typing_title_label.setStyleSheet(f"""
-            color: {colors['text_secondary']};
-            font-size: 14px;
-            font-weight: 600;
-            padding: 0px 4px;
-        """)
-        typing_top.addWidget(self._typing_title_label, 0)
-        typing_top.addStretch(1)
-        typing_layout.addLayout(typing_top)
-
-        task_container = QWidget()
-        task_container.setStyleSheet(f"""
-            QWidget {{
-                background: {colors['bg_container']};
-                border-radius: 16px;
-                padding: 24px;
+        header_row.addWidget(self._back_button, 0)
+        header_row.addStretch(1)
+        level_pill = QFrame()
+        level_pill.setFixedHeight(48)
+        level_pill.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {HomeColors.PRIMARY_LIGHT}, stop:1 {HomeColors.PRIMARY});
+                border-radius: 12px;
                 border: none;
             }}
-        """)
-        task_container_layout = QVBoxLayout(task_container)
-        task_container_layout.setContentsMargins(0, 0, 0, 0)
-        task_container_layout.setSpacing(12)
+            """
+        )
+        pill_layout = QHBoxLayout(level_pill)
+        pill_layout.setContentsMargins(20, 0, 20, 0)
+        pill_layout.setSpacing(10)
+        self._typing_title_label = QLabel("")
+        self._typing_title_label.setStyleSheet("color: white; font-size: 15px; font-weight: 800;")
+        pill_layout.addWidget(self._typing_title_label)
+        header_row.addWidget(level_pill, 0)
+        header_row.addStretch(1)
+        typing_layout.addWidget(typing_header, 0)
 
+        # Content row: left stats panel | practice panel
+        typing_content = QHBoxLayout()
+        typing_content.setSpacing(24)
+
+        # Left panel: stats (Time, WPM, Accuracy, Streak, Correct/Incorrect)
+        stats_panel = QWidget()
+        stats_panel.setFixedWidth(260)
+        stats_layout = QVBoxLayout(stats_panel)
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+        stats_layout.setSpacing(14)
+
+        time_card = GlassCard()
+        time_layout = QVBoxLayout(time_card)
+        time_layout.setContentsMargins(20, 16, 20, 16)
+        time_label = QLabel("⏱️ நேரம்")
+        time_label.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 12px;")
+        time_layout.addWidget(time_label)
+        self._typing_time_label = QLabel("0:00")
+        self._typing_time_label.setStyleSheet(f"color: {HomeColors.PRIMARY}; font-size: 36px; font-weight: 900; font-family: monospace;")
+        time_layout.addWidget(self._typing_time_label)
+        stats_layout.addWidget(time_card)
+
+        wpm_card = GlassCard()
+        wpm_layout = QVBoxLayout(wpm_card)
+        wpm_layout.setContentsMargins(20, 16, 20, 16)
+        wpm_label = QLabel("⚡ WPM")
+        wpm_label.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 12px;")
+        wpm_layout.addWidget(wpm_label)
+        self._typing_wpm_label = QLabel("0")
+        self._typing_wpm_label.setStyleSheet(f"color: {HomeColors.PRIMARY}; font-size: 36px; font-weight: 900;")
+        wpm_layout.addWidget(self._typing_wpm_label)
+        wpm_sublabel = QLabel("words per minute")
+        wpm_sublabel.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 11px;")
+        wpm_layout.addWidget(wpm_sublabel)
+        stats_layout.addWidget(wpm_card)
+
+        acc_card = GlassCard()
+        acc_layout = QVBoxLayout(acc_card)
+        acc_layout.setContentsMargins(20, 16, 20, 16)
+        acc_layout.setSpacing(10)
+        acc_header = QHBoxLayout()
+        acc_label = QLabel("🎯 துல்லியம்")
+        acc_label.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 12px;")
+        acc_header.addWidget(acc_label)
+        acc_header.addStretch(1)
+        self._typing_accuracy_value = QLabel("0%")
+        self._typing_accuracy_value.setStyleSheet(f"color: {HomeColors.PRIMARY}; font-size: 18px; font-weight: 900;")
+        acc_header.addWidget(self._typing_accuracy_value)
+        acc_layout.addLayout(acc_header)
+        self._typing_accuracy_bar = HomeProgressBar()
+        self._typing_accuracy_bar.set_progress(0, 100, HomeColors.PRIMARY_LIGHT, HomeColors.PRIMARY)
+        acc_layout.addWidget(self._typing_accuracy_bar)
+        stats_layout.addWidget(acc_card)
+
+        streak_card = GlassCard()
+        streak_layout = QVBoxLayout(streak_card)
+        streak_layout.setContentsMargins(20, 16, 20, 16)
+        streak_label = QLabel("🔥 தொடர்ச்சி")
+        streak_label.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 12px;")
+        streak_layout.addWidget(streak_label)
+        streak_row = QHBoxLayout()
+        self._typing_streak_label = QLabel("0")
+        self._typing_streak_label.setStyleSheet(f"color: {HomeColors.TEXT_PRIMARY}; font-size: 36px; font-weight: 900;")
+        streak_row.addWidget(self._typing_streak_label)
+        self._typing_best_streak_label = QLabel("/ சிறந்தது 0")
+        self._typing_best_streak_label.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 14px;")
+        streak_row.addWidget(self._typing_best_streak_label)
+        streak_row.addStretch(1)
+        streak_layout.addLayout(streak_row)
+        stats_layout.addWidget(streak_card)
+
+        score_card = GlassCard()
+        score_layout = QHBoxLayout(score_card)
+        score_layout.setContentsMargins(20, 16, 20, 16)
+        correct_widget = QWidget()
+        correct_layout = QVBoxLayout(correct_widget)
+        correct_layout.setContentsMargins(0, 0, 0, 0)
+        correct_layout.setAlignment(Qt.AlignCenter)
+        self._typing_correct_label = QLabel("0")
+        self._typing_correct_label.setStyleSheet(f"color: #2e7d32; font-size: 28px; font-weight: 900;")
+        self._typing_correct_label.setAlignment(Qt.AlignCenter)
+        correct_layout.addWidget(self._typing_correct_label)
+        correct_sublabel = QLabel("சரி ✓")
+        correct_sublabel.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 11px;")
+        correct_sublabel.setAlignment(Qt.AlignCenter)
+        correct_layout.addWidget(correct_sublabel)
+        score_layout.addWidget(correct_widget)
+        divider = QFrame()
+        divider.setFixedWidth(1)
+        divider.setStyleSheet("background: rgba(0,0,0,0.1);")
+        score_layout.addWidget(divider)
+        wrong_widget = QWidget()
+        wrong_layout = QVBoxLayout(wrong_widget)
+        wrong_layout.setContentsMargins(0, 0, 0, 0)
+        wrong_layout.setAlignment(Qt.AlignCenter)
+        self._typing_wrong_label = QLabel("0")
+        self._typing_wrong_label.setStyleSheet(f"color: #c62828; font-size: 28px; font-weight: 900;")
+        self._typing_wrong_label.setAlignment(Qt.AlignCenter)
+        wrong_layout.addWidget(self._typing_wrong_label)
+        wrong_sublabel = QLabel("தவறு ✗")
+        wrong_sublabel.setStyleSheet(f"color: {HomeColors.TEXT_MUTED}; font-size: 11px;")
+        wrong_sublabel.setAlignment(Qt.AlignCenter)
+        wrong_layout.addWidget(wrong_sublabel)
+        score_layout.addWidget(wrong_widget)
+        stats_layout.addWidget(score_card)
+        self._typing_stats_panel = stats_panel
+        typing_content.addWidget(stats_panel, 0)
+
+        # Right panel: practice area (letter sequence + hero, then progress at bottom)
+        practice_card = GlassCard()
+        self._typing_practice_card = practice_card
+        practice_layout = QVBoxLayout(practice_card)
+        practice_layout.setContentsMargins(32, 24, 32, 24)
+        practice_layout.setSpacing(20)
+
+        self._letter_sequence_widget = LetterSequenceWidget()
+        practice_layout.addWidget(self._letter_sequence_widget, 0, Qt.AlignCenter)
+
+        self._hero_letter_label = HeroLetterLabel()
+        practice_layout.addWidget(self._hero_letter_label, 0, Qt.AlignCenter)
+
+        feedback_label = QLabel("இந்த எழுத்தை தட்டச்சு செய்க")
+        feedback_label.setStyleSheet(f"color: {HomeColors.TEXT_SECONDARY}; font-size: 16px; font-weight: 600;")
+        feedback_label.setAlignment(Qt.AlignCenter)
+        practice_layout.addWidget(feedback_label)
+
+        practice_layout.addStretch(1)
+
+        self.progress_bar = ProgressCard(embedded=True)
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        practice_layout.addWidget(self.progress_bar)
+
+        # Hidden widgets for focus/key handling (zero height, no visible space)
+        hidden_container = QWidget()
+        hidden_container.setFixedHeight(0)
+        hidden_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        hidden_layout = QVBoxLayout(hidden_container)
+        hidden_layout.setContentsMargins(0, 0, 0, 0)
+        hidden_layout.setSpacing(0)
         self.combo_label = QLabel("")
         self.combo_label.setVisible(False)
-
         self.task_display = QLabel()
         self.task_display.setTextFormat(Qt.RichText)
-        self.task_display.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-        self.task_display.setStyleSheet(f"""
-            background: {colors['bg_input']};
-            color: {colors['text_primary']};
-            border: none;
-            border-radius: 12px;
-            padding: 24px 28px;
-            font-size: 26px;
-            font-weight: 400;
-            font-family: '{QApplication.font().family()}', sans-serif;
-            min-height: 100px;
-        """)
-        self.task_display.setMinimumHeight(100)
-        task_container_layout.addWidget(self.task_display)
-        typing_layout.addWidget(task_container)
-
-        input_container = QWidget()
-        input_container.setStyleSheet(f"""
-            QWidget {{
-                background: {colors['bg_container']};
-                border-radius: 16px;
-                padding: 24px;
-                border: none;
-            }}
-        """)
-        input_container_layout = QVBoxLayout(input_container)
-        input_container_layout.setContentsMargins(0, 0, 0, 0)
-        input_container_layout.setSpacing(12)
-
+        self.task_display.setVisible(False)
         self.input_box = QLineEdit()
-        self.input_box.setMinimumHeight(100)
-        self.input_box.setStyleSheet(f"""
-            QLineEdit {{
-                background: {colors['bg_input']};
-                color: {colors['text_primary']};
-                border: none;
-                border-radius: 12px;
-                padding: 24px 28px;
-                font-size: 26px;
-                font-weight: 400;
-                font-family: '{QApplication.font().family()}', sans-serif;
-            }}
-            QLineEdit:focus {{
-                border: 2px solid {colors['highlight']};
-                background: {colors['bg_container']};
-            }}
-        """)
+        self.input_box.setFixedHeight(0)
+        self.input_box.setStyleSheet("background: transparent; border: none; color: transparent;")
         self.input_box.installEventFilter(self)
-        self.input_box.setReadOnly(True)  # Prevent text input, we'll handle keys manually
-        input_container_layout.addWidget(self.input_box)
-        typing_layout.addWidget(input_container)
+        self.input_box.setReadOnly(True)
+        hidden_layout.addWidget(self.task_display)
+        hidden_layout.addWidget(self.input_box)
+        practice_layout.addWidget(hidden_container)
 
-        progress_container = QWidget()
-        progress_container.setStyleSheet(f"""
-            QWidget {{
-                background: {colors['bg_container']};
-                border-radius: 12px;
-                padding: 16px;
-                border: none;
-            }}
-        """)
-        progress_layout = QVBoxLayout(progress_container)
-        progress_layout.setSpacing(10)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: none;
-                border-radius: 8px;
-                text-align: center;
-                background: {colors['bg_card']};
-                height: 24px;
-                font-weight: 500;
-                font-size: 12px;
-                color: {colors['text_muted']};
-            }}
-            QProgressBar::chunk {{
-                background: {colors['progress']};
-                border-radius: 7px;
-            }}
-        """)
-        progress_layout.addWidget(self.progress_bar)
-        typing_layout.addWidget(progress_container)
+        typing_content.addWidget(practice_card, 1)
+        typing_layout.addLayout(typing_content, 1)
 
         # Single parent container for Finger UI and Keyboard (typing screen only)
         self._bottom_container = QWidget()
@@ -1624,6 +1889,9 @@ class MainWindow(QMainWindow):
             self._header_timer = QTimer(self)
             self._header_timer.timeout.connect(self._update_header_datetime)
             self._header_timer.start(1000)
+
+        self._typing_stats_timer = QTimer(self)
+        self._typing_stats_timer.timeout.connect(self._update_typing_stats_panel)
 
     def _update_header_datetime(self) -> None:
         if self._header_datetime_label is None:
@@ -1761,6 +2029,8 @@ class MainWindow(QMainWindow):
         if self._stack is None or self._home_screen is None:
             return
         self._stack.setCurrentWidget(self._home_screen)
+        if self._typing_stats_timer is not None:
+            self._typing_stats_timer.stop()
         if self._finger_guidance_label is not None:
             self._finger_guidance_label.setVisible(False)
         self._clear_keyboard_highlight()
@@ -1771,8 +2041,25 @@ class MainWindow(QMainWindow):
         if self._stack is None or self._typing_screen is None:
             return
         self._stack.setCurrentWidget(self._typing_screen)
+        QTimer.singleShot(0, self._sync_typing_panel_heights)
+        QTimer.singleShot(50, self._sync_typing_panel_heights)
         if hasattr(self, "input_box") and self.input_box is not None:
             self.input_box.setFocus()
+        self._update_typing_stats_panel()
+        if self._typing_stats_timer is not None:
+            self._typing_stats_timer.start(1000)
+
+    def _sync_typing_panel_heights(self) -> None:
+        """Match tutor area height to stats area, reduced by 40px so tutor is slightly shorter."""
+        if not hasattr(self, "_typing_stats_panel") or not hasattr(self, "_typing_practice_card"):
+            return
+        stats = self._typing_stats_panel
+        practice = self._typing_practice_card
+        if stats is None or practice is None:
+            return
+        h = stats.height()
+        if h > 0:
+            practice.setMaximumHeight(max(200, h - 40))
 
     def _start_session(self, level: Level, start_index: int) -> None:
         task_count = len(level.tasks)
@@ -1887,6 +2174,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._schedule_background_update()
         self._update_error_overlay_geometry()
+        if self._stack is not None and self._stack.currentWidget() is self._typing_screen:
+            QTimer.singleShot(0, self._sync_typing_panel_heights)
         QTimer.singleShot(10, self._adjust_adaptive_layout)  # Delay to ensure size is updated
     
     def _adjust_adaptive_layout(self) -> None:
@@ -2049,7 +2338,8 @@ class MainWindow(QMainWindow):
         else:
             self._input_has_error = True
             self._set_input_error_state(True)
-            self._update_display_from_keystrokes()
+            if self.task_display is not None:
+                self.task_display.setText("")
             self._flash_invalid_input_overlay()
         
         self._update_keyboard_hint()
@@ -2290,8 +2580,39 @@ class MainWindow(QMainWindow):
         else:
             self._set_home_accuracy(self._aggregate_best_accuracy())
 
+        self._update_typing_stats_panel()
         if hasattr(self, "combo_label") and self.combo_label is not None:
             self.combo_label.setVisible(False)
+
+    def _update_typing_stats_panel(self) -> None:
+        """Update typing screen left panel: time, WPM, accuracy, streak, correct/wrong, progress text."""
+        if self._session is None:
+            return
+        elapsed = int(time.time() - self._session.start_time)
+        m, s = divmod(elapsed, 60)
+        time_str = f"{m}:{s:02d}"
+        if self._typing_time_label is not None:
+            self._typing_time_label.setText(time_str)
+        wpm = self._session.aggregate_wpm()
+        if self._typing_wpm_label is not None:
+            self._typing_wpm_label.setText(f"{int(wpm)}")
+        acc = self._session.aggregate_accuracy()
+        if self._typing_accuracy_value is not None:
+            self._typing_accuracy_value.setText(f"{int(round(acc))}%")
+        if self._typing_accuracy_bar is not None:
+            self._typing_accuracy_bar.set_progress(int(round(acc)), 100, HomeColors.PRIMARY_LIGHT, HomeColors.PRIMARY)
+        if self._typing_streak_label is not None:
+            self._typing_streak_label.setText(f"{self._current_streak}")
+        if self._typing_best_streak_label is not None:
+            self._typing_best_streak_label.setText(f"/ சிறந்தது {self._best_streak}")
+        if self._typing_correct_label is not None:
+            self._typing_correct_label.setText(f"{self._session.total_correct}")
+        if self._typing_wrong_label is not None:
+            self._typing_wrong_label.setText(f"{self._session.aggregate_errors()}")
+        task_count = self._session.total_tasks
+        idx = self._session.index
+        pct = round((idx / task_count) * 100) if task_count else 0
+        self.progress_bar.setValue(idx)
 
     def _level_completed(self) -> None:
         self.task_display.setText("நிலை முடிந்தது! அடுத்த நிலையைத் தேர்வு செய்யவும்.")
@@ -2580,10 +2901,10 @@ class MainWindow(QMainWindow):
                 self._finger_guidance_label.setVisible(True)
         else:
             # Task is complete - highlight space bar to indicate user should press space for next task
+            colors = self._get_theme_colors()
             self._clear_keyboard_highlight()
             if "Space" in self._key_labels:
                 space_label = self._key_labels["Space"]
-                colors = self._get_theme_colors()
                 font_px = self._keyboard_font_sizes.get('special', 18)
                 border_color = self._highlight_border_color_for_key("Space")
                 space_label.setStyleSheet(f"""
@@ -2794,9 +3115,29 @@ class MainWindow(QMainWindow):
     def _render_task_display(self, typed: str, target: str, is_error: bool) -> None:
         if not target:
             self.task_display.setText("")
+            if self._letter_sequence_widget is not None:
+                self._letter_sequence_widget.set_letters([])
+                self._letter_sequence_widget.set_current(0)
+            if self._hero_letter_label is not None:
+                self._hero_letter_label.setText("")
             return
 
         colors = self._get_theme_colors()
+
+        # Update letter sequence and hero (practice UI)
+        letters = list(target)
+        match_len = 0
+        for i in range(min(len(typed or ""), len(target))):
+            if i < len(typed) and i < len(target) and typed[i] == target[i]:
+                match_len = i + 1
+            else:
+                break
+        if self._letter_sequence_widget is not None:
+            self._letter_sequence_widget.set_letters(letters)
+            self._letter_sequence_widget.set_current(match_len)
+        if self._hero_letter_label is not None:
+            current_char = target[match_len] if match_len < len(target) else ""
+            self._hero_letter_label.setText(current_char)
         
         if typed and typed == target:
             completed = html.escape(target)
