@@ -1425,13 +1425,13 @@ class MainWindow(QMainWindow):
 
         # ---- Home screen: Light theme glass UI (like `test.py`) ----
         home_layout = QVBoxLayout(self._home_screen)
-        home_layout.setContentsMargins(36, 28, 36, 28)
-        home_layout.setSpacing(28)
+        home_layout.setContentsMargins(16, 16, 16, 16)
+        home_layout.setSpacing(20)
 
         # Header card
         header = GlassCard()
         header_row = QHBoxLayout(header)
-        header_row.setContentsMargins(28, 20, 28, 20)
+        header_row.setContentsMargins(16, 16, 16, 16)
         header_row.setSpacing(18)
 
         logo = QFrame()
@@ -1602,11 +1602,13 @@ class MainWindow(QMainWindow):
 
         # ---- Typing screen (header + left stats + practice area; finger/keyboard unchanged) ----
         typing_layout = QVBoxLayout(self._typing_screen)
-        typing_layout.setContentsMargins(24, 20, 24, 20)
+        typing_layout.setContentsMargins(16, 16, 16, 16)
         typing_layout.setSpacing(20)
 
-        # Header: back + center teal pill (level name)
+        # Header: back + center teal pill (level name) — no extra top/bottom padding, match children height
         typing_header = QWidget()
+        typing_header.setFixedHeight(48)
+        typing_header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         header_row = QHBoxLayout(typing_header)
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(12)
@@ -1615,7 +1617,6 @@ class MainWindow(QMainWindow):
         self._back_button.setFixedHeight(48)
         self._back_button.setStyleSheet(f"""
             QPushButton {{
-                background: rgba(255,255,255,0.9);
                 border: 1px solid rgba(0,131,143,0.2);
                 border-radius: 12px;
                 color: {HomeColors.PRIMARY};
@@ -1808,10 +1809,10 @@ class MainWindow(QMainWindow):
 
         # Single parent container for Finger UI and Keyboard (typing screen only)
         self._bottom_container = QWidget()
-        self._bottom_container.setStyleSheet(f"""
+        self._bottom_container.setStyleSheet("""
             background: transparent;
             border-radius: 16px;
-            padding: 20px;
+            padding: 16px;
         """)
         bottom_row = QHBoxLayout(self._bottom_container)
         bottom_row.setSpacing(15)
