@@ -24,7 +24,6 @@ from PySide6.QtGui import (
     QRadialGradient,
     QShortcut,
 )
-from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QGridLayout,
@@ -1073,13 +1072,6 @@ class MainWindow(QMainWindow):
         self._levels_list_container: Optional[QWidget] = None
         self._home_levels_layout: Optional[QVBoxLayout] = None
         
-        # Background SVG
-        self._background_svg_path: Optional[Path] = None
-        self._background_svg_renderer: Optional[QSvgRenderer] = None
-        self._background_label: Optional[QLabel] = None
-        self._background_update_timer: Optional[QTimer] = None
-        self._background_last_render_key: Optional[tuple[int, int, float]] = None
-
         # Invalid input overlay (red flash)
         self._error_overlay: Optional[QWidget] = None
         self._error_overlay_effect: Optional[QGraphicsOpacityEffect] = None
@@ -1378,27 +1370,6 @@ class MainWindow(QMainWindow):
             }}
         """)
         
-        # Setup background SVG
-        background_svg_path = Path(__file__).parent.parent / "assets" / "background.svg"
-        if background_svg_path.exists():
-            self._background_svg_path = background_svg_path
-            self._background_svg_renderer = QSvgRenderer(str(background_svg_path))
-
-        # Create background label for SVG (as child of main window to cover entire window)
-        if self._background_svg_renderer:
-            self._background_label = QLabel(self)
-            self._background_label.setAlignment(Qt.AlignCenter)
-            self._background_label.lower()  # Put it behind everything
-            self._background_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # Allow clicks to pass through
-            # During interactive resize, allow cheap scaling of last pixmap;
-            # a debounced re-render will refresh it crisply.
-            self._background_label.setScaledContents(True)
-
-            # Debounce expensive SVG->pixmap renders on resize
-            self._background_update_timer = QTimer(self)
-            self._background_update_timer.setSingleShot(True)
-            self._background_update_timer.timeout.connect(self._update_background)
-
         # Create invalid input overlay (as child of main window to cover entire window)
         self._error_overlay = QWidget(self)
         self._error_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1503,23 +1474,15 @@ class MainWindow(QMainWindow):
         stats_row.addWidget(self._best_streak_card)
         stats_layout.addLayout(stats_row)
 
-        # Accuracy
-        accuracy_box = QFrame()
-        accuracy_box.setStyleSheet(
-            f"""
-            QFrame {{
-                background: rgba(255, 255, 255, 0.55);
-                border: 1px solid rgba(255, 255, 255, 0.6);
-                border-radius: 14px;
-            }}
-            """
-        )
+        # Accuracy (elevated card like Points/Streak/Best)
+        accuracy_box = GlassCard()
         accuracy_layout = QVBoxLayout(accuracy_box)
         accuracy_layout.setContentsMargins(14, 12, 14, 12)
         accuracy_layout.setSpacing(8)
         accuracy_row = QHBoxLayout()
         accuracy_row.setContentsMargins(0, 0, 0, 0)
         accuracy_label = QLabel("துல்லியம்")
+        accuracy_label.setContentsMargins(0, 0, 0, 10);
         accuracy_label.setStyleSheet(f"color: {HomeColors.TEXT_SECONDARY}; font-size: 12px; font-weight: 800;")
         self._accuracy_value_label = QLabel("0%")
         self._accuracy_value_label.setStyleSheet(f"color: {HomeColors.TEXT_PRIMARY}; font-size: 12px; font-weight: 900;")
@@ -1875,8 +1838,6 @@ class MainWindow(QMainWindow):
         # Start on home screen
         self._stack.setCurrentWidget(self._home_screen)
 
-        # Update background after window is set up
-        self._update_background()
         self._update_error_overlay_geometry()
 
         self.start_shortcut = QShortcut(Qt.CTRL | Qt.Key_Return, self)
@@ -2173,7 +2134,6 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event) -> None:
         """Handle window resize to adjust keyboard and finger UI"""
         super().resizeEvent(event)
-        self._schedule_background_update()
         self._update_error_overlay_geometry()
         if self._stack is not None and self._stack.currentWidget() is self._typing_screen:
             QTimer.singleShot(0, self._sync_typing_panel_heights)
@@ -3253,59 +3213,3 @@ class MainWindow(QMainWindow):
 
         self.task_display.setMinimumHeight(int(task_size * 2.2))
         self.input_box.setMinimumHeight(int(input_size * 2.2))
-    
-    def _update_background(self) -> None:
-        """Update the background SVG to fit the window size, preserving aspect ratio."""
-        if not self._background_label or not self._background_svg_renderer:
-            return
-
-        size = self.size()
-        if size.width() <= 0 or size.height() <= 0:
-            return
-
-        dpr = self.devicePixelRatioF()
-        render_key = (size.width(), size.height(), dpr)
-
-        if self._background_last_render_key == render_key:
-            return
-
-        pixmap = QPixmap(size * dpr)
-        pixmap.setDevicePixelRatio(dpr)
-        pixmap.fill(Qt.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        svg_size = self._background_svg_renderer.defaultSize()
-        if svg_size.width() > 0 and svg_size.height() > 0:
-            win_size = size
-            scale_x = win_size.width() / svg_size.width()
-            scale_y = win_size.height() / svg_size.height()
-            
-            scale = max(scale_x, scale_y)
-
-            scaled_width = svg_size.width() * scale
-            scaled_height = svg_size.height() * scale
-            
-            x = (win_size.width() - scaled_width) / 2
-            y = (win_size.height() - scaled_height) / 2
-            
-            target_rect = QRectF(x, y, scaled_width, scaled_height)
-            self._background_svg_renderer.render(painter, target_rect)
-
-        painter.end()
-
-        self._background_label.setPixmap(pixmap)
-        self._background_label.setGeometry(0, 0, size.width(), size.height())
-        self._background_last_render_key = render_key
-
-    def _schedule_background_update(self, debounce_ms: int = 50) -> None:
-        """Debounce background renders during interactive resize."""
-        if not self._background_label or not self._background_svg_renderer:
-            return
-        if self._background_update_timer is None:
-            self._update_background()
-            return
-        # Restart timer (cancels previous pending update)
-        self._background_update_timer.stop()
-        self._background_update_timer.start(max(0, int(debounce_ms)))
