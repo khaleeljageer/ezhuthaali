@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QDateTime, QPoint, QPointF, QTimer, QSize, QPropertyAnimation, QRectF
+from PySide6.QtCore import Qt, QDateTime, QPoint, QPointF, QTimer, QSize, QPropertyAnimation, QRectF, Signal, QEventLoop, QEvent
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -27,6 +27,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -369,6 +370,201 @@ class GlassCard(QFrame):
         shadow.setOffset(0, 8)
         shadow.setColor(QColor(0, 50, 70, 40))
         self.setGraphicsEffect(shadow)
+
+
+class AboutKaniyamDialog(QDialog):
+    """Custom popup for About — Kaniyam Foundation. Frameless with 80% transparent overlay and single rounded content."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("எங்களை பற்றி")
+        self.setModal(True)
+        self.setMinimumWidth(380)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("QDialog { background: transparent; }")
+
+        main_layout = QGridLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.setRowStretch(0, 1)
+        main_layout.setColumnStretch(0, 1)
+
+        overlay = QWidget(self)
+        overlay.setStyleSheet("background: rgba(0, 0, 0, 0.2);")
+        overlay.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        overlay.setCursor(Qt.CursorShape.ArrowCursor)
+        overlay.setMinimumSize(1, 1)
+        overlay.mousePressEvent = lambda e: self.accept()
+        main_layout.addWidget(overlay, 0, 0)
+
+        container = QFrame(self)
+        container.setObjectName("aboutContainer")
+        radius = 20
+        container.setStyleSheet(
+            f"""
+            QFrame#aboutContainer {{
+                background: #ffffff;
+                border: 1px solid {HomeColors.CARD_BORDER};
+                border-radius: {radius}px;
+            }}
+            """
+        )
+        layout = QVBoxLayout(container)
+        layout.setSpacing(16)
+        layout.setContentsMargins(28, 28, 28, 28)
+        main_layout.addWidget(container, 0, 0, 1, 1, Qt.AlignCenter)
+
+        title = QLabel("Kaniyam Foundation")
+        title.setStyleSheet(
+            f"color: {HomeColors.PRIMARY}; font-size: 22px; font-weight: 900;"
+        )
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        body = QLabel(
+            "கணியம் அறக்கட்டளை தமிழ் மொழி மற்றும் தொழில்நுட்பத்தை இணைக்கும் "
+            "திட்டங்களை ஊக்குவிக்கிறது. எழுத்தாளி தமிழ் தட்டச்சு கற்றலை எளிமையாக்கும் "
+            "ஒரு சாதனம்."
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(
+            f"color: {HomeColors.TEXT_PRIMARY}; font-size: 14px; font-weight: 500; line-height: 1.5;"
+        )
+        body.setAlignment(Qt.AlignCenter)
+        layout.addWidget(body)
+
+        close_btn = QPushButton("மூடு")
+        close_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {HomeColors.PRIMARY_LIGHT}, stop:1 {HomeColors.PRIMARY});
+                color: white;
+                padding: 10px 24px;
+                border: none;
+                border-radius: 12px;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{ background: {HomeColors.PRIMARY}; }}
+            """
+        )
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn, 0, Qt.AlignCenter)
+
+
+class AboutOverlay(QWidget):
+    """In-window overlay for About — stays inside the main window and is clipped to it."""
+
+    closed = Signal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setStyleSheet("")
+        main_layout = QGridLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.setRowStretch(0, 1)
+        main_layout.setColumnStretch(0, 1)
+
+        overlay_bg = QWidget(self)
+        overlay_bg.setStyleSheet("background: rgba(0, 0, 0, 0.2);")
+        overlay_bg.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        overlay_bg.setCursor(Qt.CursorShape.ArrowCursor)
+        overlay_bg.setMinimumSize(1, 1)
+
+        def on_overlay_click(_e) -> None:
+            self.hide()
+            self.closed.emit()
+
+        overlay_bg.mousePressEvent = on_overlay_click
+        main_layout.addWidget(overlay_bg, 0, 0)
+
+        container = QFrame(self)
+        container.setObjectName("aboutContainer")
+        radius = 20
+        container.setStyleSheet(
+            f"""
+            QFrame#aboutContainer {{
+                background: #ffffff;
+                border: 1px solid {HomeColors.CARD_BORDER};
+                border-radius: {radius}px;
+            }}
+            """
+        )
+        layout = QVBoxLayout(container)
+        layout.setSpacing(16)
+        layout.setContentsMargins(28, 28, 28, 28)
+        main_layout.addWidget(container, 0, 0, 1, 1, Qt.AlignCenter)
+
+        title = QLabel("Kaniyam Foundation")
+        title.setStyleSheet(
+            f"color: {HomeColors.PRIMARY}; font-size: 22px; font-weight: 900;"
+        )
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        body = QLabel(
+            "கணியம் அறக்கட்டளை தமிழ் மொழி மற்றும் தொழில்நுட்பத்தை இணைக்கும் "
+            "திட்டங்களை ஊக்குவிக்கிறது. எழுத்தாளி தமிழ் தட்டச்சு கற்றலை எளிமையாக்கும் "
+            "ஒரு சாதனம்."
+        )
+        body.setWordWrap(True)
+        body.setStyleSheet(
+            f"color: {HomeColors.TEXT_PRIMARY}; font-size: 14px; font-weight: 500; line-height: 1.5;"
+        )
+        body.setAlignment(Qt.AlignCenter)
+        layout.addWidget(body)
+
+        close_btn = QPushButton("மூடு")
+        close_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {HomeColors.PRIMARY_LIGHT}, stop:1 {HomeColors.PRIMARY});
+                color: white;
+                padding: 10px 24px;
+                border: none;
+                border-radius: 12px;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{ background: {HomeColors.PRIMARY}; }}
+            """
+        )
+        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.clicked.connect(lambda: (self.hide(), self.closed.emit()))
+        layout.addWidget(close_btn, 0, Qt.AlignCenter)
+
+    def _update_geometry(self) -> None:
+        parent = self.parentWidget()
+        if parent is not None:
+            self.setGeometry(parent.rect())
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_geometry()
+
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        if obj is self.parentWidget() and event.type() == QEvent.Type.Resize:
+            self._update_geometry()
+        return super().eventFilter(obj, event)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_geometry()
+        parent = self.parentWidget()
+        if parent is not None:
+            parent.installEventFilter(self)
+
+    def hideEvent(self, event) -> None:
+        parent = self.parentWidget()
+        if parent is not None:
+            parent.removeEventFilter(self)
+        super().hideEvent(event)
 
 
 class HomeStatCard(QFrame):
@@ -1456,6 +1652,9 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._typing_screen)
         self.setCentralWidget(self._stack)
 
+        self._about_overlay = AboutOverlay(self._stack)
+        self._about_overlay.hide()
+
         # ---- Home screen: Light theme glass UI (like `test.py`) ----
         home_layout = QVBoxLayout(self._home_screen)
         home_layout.setContentsMargins(16, 16, 16, 16)
@@ -1544,7 +1743,6 @@ class MainWindow(QMainWindow):
         accuracy_row = QHBoxLayout()
         accuracy_row.setContentsMargins(0, 0, 0, 0)
         accuracy_label = QLabel("துல்லியம்")
-        accuracy_label.setContentsMargins(0, 0, 0, 10);
         accuracy_label.setStyleSheet(f"color: {HomeColors.TEXT_SECONDARY}; font-size: 12px; font-weight: 800;")
         self._accuracy_value_label = QLabel("0%")
         self._accuracy_value_label.setStyleSheet(f"color: {HomeColors.TEXT_PRIMARY}; font-size: 12px; font-weight: 900;")
@@ -1556,8 +1754,6 @@ class MainWindow(QMainWindow):
         self._accuracy_bar.set_progress(0, 100, QColor(HomeColors.MINT).lighter(120).name(), HomeColors.PRIMARY)
         accuracy_layout.addWidget(self._accuracy_bar)
         stats_layout.addWidget(accuracy_box)
-
-        stats_layout.addStretch(1)
 
         self.reset_button = QPushButton("↻ மீட்டமை")
         self.reset_button.setStyleSheet(
@@ -1578,6 +1774,36 @@ class MainWindow(QMainWindow):
         )
         self.reset_button.clicked.connect(self._reset_progress)
         stats_layout.addWidget(self.reset_button, 0)
+
+        stats_layout.addStretch(1)
+
+        bottom_row = QHBoxLayout()
+        bottom_row.setContentsMargins(0, 0, 0, 0)
+        bottom_row.addStretch(1)
+        about_btn = QPushButton()
+        about_btn.setToolTip("எங்களை பற்றி")
+        about_icon_path = Path(__file__).resolve().parent.parent / "assets" / "icons" / "icon_about.svg"
+        if about_icon_path.exists():
+            about_btn.setIcon(QIcon(str(about_icon_path)))
+        about_btn.setIconSize(QSize(22, 22))
+        about_btn.setFixedSize(44, 44)
+        about_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {HomeColors.PRIMARY_LIGHT}, stop:1 {HomeColors.PRIMARY});
+                color: white;
+                border: none;
+                border-radius: 14px;
+            }}
+            QPushButton:hover {{ background: {HomeColors.PRIMARY}; }}
+            QPushButton:pressed {{ background: {HomeColors.PRIMARY_DARK}; }}
+            """
+        )
+        about_btn.setCursor(Qt.PointingHandCursor)
+        about_btn.clicked.connect(self._show_about)
+        bottom_row.addWidget(about_btn, 0)
+        stats_layout.addLayout(bottom_row)
 
         content_row.addWidget(stats_panel, 0)
 
@@ -2683,6 +2909,16 @@ class MainWindow(QMainWindow):
             self._best_streak = 0
             self._update_gamification_stats()
             self._refresh_levels_list()
+
+    def _show_about(self) -> None:
+        overlay = self._about_overlay
+        overlay.setGeometry(self._stack.rect())
+        overlay.raise_()
+        overlay.show()
+        loop = QEventLoop()
+        overlay.closed.connect(loop.quit)
+        loop.exec()
+        overlay.closed.disconnect(loop.quit)
 
     def _build_keyboard(self) -> QWidget:
         container = QWidget()
