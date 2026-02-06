@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QGuiApplication,
+    QIcon,
     QKeyEvent,
     QLinearGradient,
     QPainter,
@@ -42,7 +43,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
-    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -420,14 +420,20 @@ class HomeLevelRowCard(QFrame):
         total: int,
         unlocked: bool,
         selected: bool,
+        completed: bool,
         on_click: Callable[[str], None],
+        on_restart: Optional[Callable[[str], None]] = None,
+        on_view: Optional[Callable[[str], None]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._level_key = level_key
         self._unlocked = bool(unlocked)
         self._selected = bool(selected)
+        self._completed = bool(completed)
         self._on_click = on_click
+        self._on_restart = on_restart
+        self._on_view = on_view
 
         self.setCursor(Qt.PointingHandCursor if self._unlocked else Qt.ForbiddenCursor)
         self.setObjectName("homeLevelRowCard")
@@ -503,9 +509,63 @@ class HomeLevelRowCard(QFrame):
         layout.addWidget(info_widget, 1)
 
         if self._unlocked:
-            arrow = QLabel("›")
-            arrow.setStyleSheet(f"color: {HomeColors.PRIMARY_LIGHT}; font-size: 28px; font-weight: 900;")
-            layout.addWidget(arrow)
+            if self._completed and self._on_restart is not None:
+                btn_row = QHBoxLayout()
+                btn_row.setSpacing(8)
+                icons_dir = Path(__file__).resolve().parent.parent / "assets" / "icons"
+                icon_sz = 20
+                view_icon_path = icons_dir / "icon_view.svg"
+                restart_icon_path = icons_dir / "icon_restart.svg"
+                view_btn = QPushButton()
+                if view_icon_path.exists():
+                    view_btn.setIcon(QIcon(str(view_icon_path)))
+                view_btn.setIconSize(QSize(icon_sz, icon_sz))
+                view_btn.setToolTip("பார்க்க")
+                view_btn.setFixedSize(40, 40)
+                view_btn.setCursor(Qt.PointingHandCursor)
+                view_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background: {HomeColors.CARD_BG};
+                        border: 1px solid {HomeColors.PRIMARY_LIGHT};
+                        border-radius: 10px;
+                        color: {HomeColors.PRIMARY};
+                        padding: 0;
+                    }}
+                    QPushButton:hover {{ background: rgba(255,255,255,0.95); border-color: {HomeColors.PRIMARY}; }}
+                    """
+                )
+                view_btn.clicked.connect(
+                    lambda: (self._on_view(self._level_key) if self._on_view is not None else self._on_click(self._level_key))
+                )
+                restart_btn = QPushButton()
+                if restart_icon_path.exists():
+                    restart_btn.setIcon(QIcon(str(restart_icon_path)))
+                restart_btn.setIconSize(QSize(icon_sz, icon_sz))
+                restart_btn.setToolTip("மீண்டும் தொடங்கு")
+                restart_btn.setFixedSize(40, 40)
+                restart_btn.setCursor(Qt.PointingHandCursor)
+                restart_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                            stop:0 {HomeColors.PRIMARY_LIGHT}, stop:1 {HomeColors.PRIMARY});
+                        border: none;
+                        border-radius: 10px;
+                        color: white;
+                        padding: 0;
+                    }}
+                    QPushButton:hover {{ background: {HomeColors.PRIMARY}; }}
+                    """
+                )
+                restart_btn.clicked.connect(lambda: self._on_restart(self._level_key))
+                btn_row.addWidget(view_btn)
+                btn_row.addWidget(restart_btn)
+                layout.addLayout(btn_row)
+            else:
+                arrow = QLabel("›")
+                arrow.setStyleSheet(f"color: {HomeColors.PRIMARY_LIGHT}; font-size: 28px; font-weight: 900;")
+                layout.addWidget(arrow)
 
         self._apply_style()
 
@@ -581,7 +641,7 @@ class HomeLevelRowCard(QFrame):
         super().leaveEvent(event)
 
     def mousePressEvent(self, event) -> None:
-        if self._unlocked:
+        if self._unlocked and not self._completed:
             self._on_click(self._level_key)
         super().mousePressEvent(event)
 
@@ -1011,14 +1071,16 @@ class MainWindow(QMainWindow):
         self._task_display_offset: int = 0
         self._unlock_all_levels = os.environ.get("EZUTHALI_UNLOCK_ALL") == "1"
         self._input_has_error = False
-        
-        # Gamification stats
-        self._current_streak: int = 0
-        self._best_streak: int = 0
-        self._total_score: int = 0
+
+        # Gamification stats (loaded from persistent store)
+        ts, cs, bs = self._progress_store.get_gamification()
+        self._total_score: int = ts
+        self._current_streak: int = cs
+        self._best_streak: int = bs
         self._combo_multiplier: float = 1.0
         self._consecutive_correct: int = 0
-        
+        self._view_only_session: bool = False
+
         # Keystroke tracking
         self._keystroke_tracker = KeystrokeTracker()
         self._tamil99_layout = Tamil99KeyboardLayout()
@@ -1734,10 +1796,10 @@ class MainWindow(QMainWindow):
         self._hero_letter_label = HeroLetterLabel()
         practice_layout.addWidget(self._hero_letter_label, 0, Qt.AlignCenter)
 
-        feedback_label = QLabel("இந்த எழுத்தை தட்டச்சு செய்க")
-        feedback_label.setStyleSheet(f"color: {HomeColors.TEXT_SECONDARY}; font-size: 16px; font-weight: 600;")
-        feedback_label.setAlignment(Qt.AlignCenter)
-        practice_layout.addWidget(feedback_label)
+        self._typing_feedback_label = QLabel("இந்த எழுத்தை தட்டச்சு செய்க")
+        self._typing_feedback_label.setStyleSheet(f"color: {HomeColors.TEXT_SECONDARY}; font-size: 16px; font-weight: 600;")
+        self._typing_feedback_label.setAlignment(Qt.AlignCenter)
+        practice_layout.addWidget(self._typing_feedback_label)
 
         practice_layout.addStretch(1)
 
@@ -1920,6 +1982,7 @@ class MainWindow(QMainWindow):
                 task_count = len(state.level.tasks)
                 title = name_map.get(level_id, state.level.name)
                 icon = icon_map.get(level_id, title[:1] if title else "•")
+                completed = state.completed >= task_count and task_count > 0
                 card = HomeLevelRowCard(
                     level_key=state.level.key,
                     level_id=level_id,
@@ -1929,7 +1992,10 @@ class MainWindow(QMainWindow):
                     total=int(task_count),
                     unlocked=bool(state.unlocked),
                     selected=bool(state.is_current),
+                    completed=completed,
                     on_click=self._start_level,
+                    on_restart=self._restart_level,
+                    on_view=self._view_level,
                 )
                 self._home_levels_layout.addWidget(card)
 
@@ -1958,7 +2024,17 @@ class MainWindow(QMainWindow):
                     break
         return states
 
-    def _start_level(self, level_key: str) -> None:
+    def _restart_level(self, level_key: str) -> None:
+        """Clear progress for the level and start it from the beginning."""
+        self._progress_store.reset_level(level_key)
+        self._start_level(level_key, view_only=False)
+
+    def _view_level(self, level_key: str) -> None:
+        """Open a completed level in view-only mode (no timer, no typing)."""
+        self._start_level(level_key, view_only=True)
+
+    def _start_level(self, level_key: str, view_only: bool = False) -> None:
+        self._view_only_session = view_only
         level = self._levels_repo.get(level_key)
         progress = self._progress_store.get_level_progress(level_key)
         task_count = len(level.tasks)
@@ -1976,6 +2052,11 @@ class MainWindow(QMainWindow):
         self._start_session(level, progress.completed)
         if self._typing_title_label is not None:
             self._typing_title_label.setText(level.name)
+        if self._typing_feedback_label is not None:
+            if view_only:
+                self._typing_feedback_label.setText("பார்வை மட்டும் — தட்டச்சு செய்ய முடியாது")
+            else:
+                self._typing_feedback_label.setText("இந்த எழுத்தை தட்டச்சு செய்க")
         self._show_typing_screen()
 
     def _on_level_selected(self) -> None:
@@ -2008,7 +2089,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "input_box") and self.input_box is not None:
             self.input_box.setFocus()
         self._update_typing_stats_panel()
-        if self._typing_stats_timer is not None:
+        if not self._view_only_session and self._typing_stats_timer is not None:
             self._typing_stats_timer.start(1000)
 
     def _sync_typing_panel_heights(self) -> None:
@@ -2245,7 +2326,9 @@ class MainWindow(QMainWindow):
         """Handle individual key press events"""
         if not self._session:
             return False
-        
+        if self._view_only_session:
+            return True
+
         key = event.key()
         text = event.text()
         
@@ -2523,7 +2606,12 @@ class MainWindow(QMainWindow):
             self._combo_multiplier = 1.5
         else:
             self._combo_multiplier = 1.0
-        
+
+        self._progress_store.update_gamification(
+            self._total_score,
+            self._current_streak,
+            self._best_streak,
+        )
         self._update_gamification_stats()
     
     def _update_gamification_stats(self) -> None:
@@ -2590,6 +2678,10 @@ class MainWindow(QMainWindow):
         )
         if confirm == QMessageBox.Yes:
             self._progress_store.reset()
+            self._total_score = 0
+            self._current_streak = 0
+            self._best_streak = 0
+            self._update_gamification_stats()
             self._refresh_levels_list()
 
     def _build_keyboard(self) -> QWidget:
