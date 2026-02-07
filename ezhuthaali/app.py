@@ -68,7 +68,9 @@ def load_application_font(app: QApplication) -> None:
 def run() -> None:
     configure_logging()
     app = QApplication(sys.argv)
-    
+    app.setApplicationName("Thattan")
+    app.setApplicationDisplayName("Thattan")
+
     # Load and set the Tamil font as default
     load_application_font(app)
 

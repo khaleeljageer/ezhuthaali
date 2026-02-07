@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -18,6 +21,9 @@ def _default_gamification() -> Dict[str, int]:
 
 
 class ProgressStore:
+    """Stores level and gamification progress. Persists to disk across app restarts.
+    File: ~/.ezhuthaali/progress.json. Cleared only when user presses reset progress."""
+
     def __init__(self) -> None:
         self._file_path = Path.home() / ".ezhuthaali" / "progress.json"
         self._file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,8 +72,13 @@ class ProgressStore:
         self._save()
 
     def reset(self) -> None:
+        """Clear all progress. Only called when user presses reset progress button."""
         self._progress = {}
         self._gamification = _default_gamification()
+        self._save()
+
+    def save(self) -> None:
+        """Persist current state to disk (e.g. on app exit)."""
         self._save()
 
     def _load(self) -> Tuple[Dict[str, LevelProgress], Dict[str, int]]:
@@ -76,8 +87,9 @@ class ProgressStore:
         if not self._file_path.exists():
             return progress, gamification
         try:
-            payload = json.loads(self._file_path.read_text())
-        except json.JSONDecodeError:
+            payload = json.loads(self._file_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Could not load progress from %s: %s", self._file_path, e)
             return progress, gamification
 
         for key, value in payload.get("levels", {}).items():
@@ -94,8 +106,12 @@ class ProgressStore:
         return progress, gamification
 
     def _save(self) -> None:
+        self._file_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "levels": {key: asdict(value) for key, value in self._progress.items()},
             "gamification": dict(self._gamification),
         }
-        self._file_path.write_text(json.dumps(payload, indent=2))
+        try:
+            self._file_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError as e:
+            logger.warning("Could not save progress to %s: %s", self._file_path, e)

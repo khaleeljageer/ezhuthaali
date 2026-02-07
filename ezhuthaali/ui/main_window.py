@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt, QDateTime, QPoint, QPointF, QTimer, QSize, QPropertyAnimation, QRectF, QEventLoop
 from PySide6.QtGui import (
     QBrush,
+    QCloseEvent,
     QColor,
     QDesktopServices,
     QFont,
@@ -2046,9 +2047,8 @@ class MainWindow(QMainWindow):
 
             self._home_levels_layout.addStretch(1)
 
-        # Keep left panel accuracy in sync with stored best (home screen)
-        if self._session is None:
-            self._set_home_accuracy(self._aggregate_best_accuracy())
+        # Keep left panel and gamification cards in sync with stored progress (home screen)
+        self._update_gamification_stats()
 
     def _build_level_states(self) -> list[LevelState]:
         levels = self._levels_repo.all()
@@ -2736,6 +2736,12 @@ class MainWindow(QMainWindow):
             self._best_streak = 0
             self._update_gamification_stats()
             self._refresh_levels_list()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Persist progress when closing the app."""
+        if self._progress_store is not None:
+            self._progress_store.save()
+        super().closeEvent(event)
 
     def _show_about(self) -> None:
         overlay = self._about_overlay
