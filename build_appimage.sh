@@ -17,9 +17,9 @@ ARCH="x86_64"
 
 # Pinned appimagetool release (commit 8c8c91f, 2025-12-04)
 # https://github.com/AppImage/appimagetool/releases/tag/continuous
-APPIMAGETOOL_VERSION="continuous"  # pinned to known-good build below
+APPIMAGETOOL_VERSION="1.9.1"  # pinned to known-good build below
 APPIMAGE_TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${ARCH}.AppImage"
-APPIMAGE_TOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
+APPIMAGE_TOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
 RELEASE_DIR="release"
 OUTPUT_APPIMAGE="${RELEASE_DIR}/${APP_NAME}-${ARCH}.AppImage"
 
