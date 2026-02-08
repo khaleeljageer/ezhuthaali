@@ -30,6 +30,13 @@ MANIFEST
 # PyInstaller
 *.manifest
 *.spec
+# Keep the project spec for AppImage build
+!thattan.spec
+
+# AppImage build
+AppDir/
+appimagetool*.AppImage
+appimageupdatetool*.AppImage
 
 # Installer logs
 pip-log.txt
