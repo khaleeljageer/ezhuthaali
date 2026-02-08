@@ -14,8 +14,12 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="Thattan"
 ARCH="x86_64"
-# New appimagetool repo (AppImageKit is obsolete)
-APPIMAGE_TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage"
+
+# Pinned appimagetool release (commit 8c8c91f, 2025-12-04)
+# https://github.com/AppImage/appimagetool/releases/tag/continuous
+APPIMAGETOOL_VERSION="continuous"  # pinned to known-good build below
+APPIMAGE_TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${ARCH}.AppImage"
+APPIMAGE_TOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
 RELEASE_DIR="release"
 OUTPUT_APPIMAGE="${RELEASE_DIR}/${APP_NAME}-${ARCH}.AppImage"
 
@@ -66,14 +70,33 @@ if [[ -f "$ICON_SRC" ]]; then
   cp "$ICON_SRC" "AppDir/thattan.png"
 fi
 
-echo "==> Downloading appimagetool (builder) if needed..."
-# Use builder tool only (appimagetool), not appimageupdatetool. Save under a distinct name.
-APPIMAGETOOL_BIN="appimagetool-build-${ARCH}.AppImage"
-if [[ ! -f "$APPIMAGETOOL_BIN" ]] || ! file "$APPIMAGETOOL_BIN" | grep -qE "ELF|executable|AppImage"; then
-  echo "    Fetching $APPIMAGE_TOOL_URL"
+echo "==> Verifying appimagetool (builder)..."
+APPIMAGETOOL_BIN="appimagetool-${ARCH}.AppImage"
+
+verify_checksum() {
+  local file="$1"
+  local expected="$2"
+  local actual
+  actual="$(sha256sum "$file" | cut -d' ' -f1)"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "    CHECKSUM MISMATCH for $file"
+    echo "    Expected: $expected"
+    echo "    Got:      $actual"
+    echo "    Delete $file and check the URL or update the pinned hash."
+    return 1
+  fi
+  echo "    Checksum OK ($actual)"
+  return 0
+}
+
+if [[ -f "$APPIMAGETOOL_BIN" ]] && verify_checksum "$APPIMAGETOOL_BIN" "$APPIMAGE_TOOL_SHA256"; then
+  echo "    Using cached $APPIMAGETOOL_BIN"
+else
+  echo "    Downloading $APPIMAGE_TOOL_URL"
   curl -sL -o "$APPIMAGETOOL_BIN" "$APPIMAGE_TOOL_URL"
-  if ! file "$APPIMAGETOOL_BIN" | grep -qE "ELF|executable|AppImage"; then
-    echo "    ERROR: Download did not get a valid AppImage (got HTML or error page). Check the URL or network."
+  if ! verify_checksum "$APPIMAGETOOL_BIN" "$APPIMAGE_TOOL_SHA256"; then
+    echo "    ERROR: Downloaded file does not match pinned SHA-256. Aborting."
+    rm -f "$APPIMAGETOOL_BIN"
     exit 1
   fi
   chmod +x "$APPIMAGETOOL_BIN"
