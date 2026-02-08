@@ -273,7 +273,7 @@ class TestRecordStroke:
 
     def test_response_time_auto_calculated(self):
         tracker = KeystrokeTracker()
-        result = tracker.record_stroke("a", "a")  # no explicit response_time
+        tracker.record_stroke("a", "a")  # no explicit response_time
         assert len(tracker.stats["response_times"]) == 1
         assert tracker.stats["response_times"][0] >= 0
 
