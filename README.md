@@ -19,12 +19,8 @@ A Tamil99 typing practice application built with Python + PySide6. Designed as a
 
 ### 🎨 User Interface
 - **Light Theme**: Modern, clean light theme
-- **Responsive Design**: Screen size-based font scaling
-- **Adaptive Layout**: Keyboard and finger UI automatically adjust to window size, preventing cropping
 - **Keyboard Display**: On-screen keyboard display with next key highlighting
 - **Finger Guidance**: Visual finger placement guide showing which finger to use for each key
-- **Word-by-Word Scrolling**: Scrolling word-by-word for long lines
-- **Dynamic Resizing**: Layout adapts in real-time when window is resized
 
 ## Installation
 
