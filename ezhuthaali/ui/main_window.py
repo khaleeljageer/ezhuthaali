@@ -1099,7 +1099,8 @@ class MainWindow(QMainWindow):
             )
         self._start_session(level, progress.completed)
         if self._typing_title_label is not None:
-            self._typing_title_label.setText(level.name)
+            level_id = re.sub(r"^level", "", level.key)
+            self._typing_title_label.setText(f"நிலை {level_id} : {level.name}")
         if self._typing_feedback_label is not None:
             if view_only:
                 self._typing_feedback_label.setText("பார்வை மட்டும் — தட்டச்சு செய்ய முடியாது")
