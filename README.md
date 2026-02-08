@@ -36,7 +36,7 @@ A Tamil99 typing practice application built with Python + PySide6. Designed as a
 
 ```bash
 # 1. Clone the repository
-git clone <repository-url>
+git clone https://github.com/khaleeljageer/thattan.git
 cd thattan
 
 # 2. Create virtual environment
@@ -104,19 +104,32 @@ This application uses the Tamil99 keyboard layout. All key mappings are embedded
 
 ### Structure
 ```
-thattan/
-├── app.py                 # Application entry point
-├── thattan/
+thattan/                        # ← repo root (git clone creates this)
+├── thattan/                    # Python package
+│   ├── __main__.py             # python -m thattan entry point
+│   ├── app.py                  # Application setup
 │   ├── core/
-│   │   ├── levels.py      # Level management
-│   │   ├── progress.py    # Progress storage
-│   │   ├── session.py     # Typing session
+│   │   ├── levels.py           # Level loading from YAML
+│   │   ├── progress.py         # Progress storage
+│   │   ├── session.py          # Typing session logic
 │   │   └── keystroke_tracker.py  # Keystroke tracking
 │   ├── ui/
-│   │   └── main_window.py # Main UI
-│   └── data/
-│       └── levels/        # Practice level YAML files
-└── requirements.txt
+│   │   ├── main_window.py      # Main window & screen management
+│   │   ├── colors.py           # Theme colors & utilities
+│   │   ├── models.py           # UI data models
+│   │   ├── home_widgets.py     # Home screen widgets
+│   │   ├── level_cards.py      # Level selection cards
+│   │   ├── typing_widgets.py   # Typing practice widgets
+│   │   ├── about_overlay.py    # About dialog
+│   │   └── custom_overlay.py   # Custom overlay widgets
+│   ├── data/
+│   │   └── levels/             # Practice level YAML files
+│   └── assets/                 # Fonts, images, SVGs
+├── tests/                      # Unit tests
+├── requirements.txt
+├── build_appimage.sh           # AppImage build script
+├── thattan.spec                # PyInstaller spec
+└── README.md
 ```
 
 ## License
