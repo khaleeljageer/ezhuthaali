@@ -140,6 +140,10 @@ This project is released as open source.
 
 Contributions are welcome! Please send a pull request.
 
+## Acknowledgements
+
+This project is inspired by [Thataan (தட்டான்)](https://github.com/manoj-makkuboy/Thataan) by Manoj Mohan — a web-based typing tutor for the Tamil99 keyboard layout.
+
 ## Resources
 
 - [Tamil99 Keyboard Layout Documentation](https://help.keyman.com/keyboard/ekwtamil99uni/2.0.5/ekwtamil99uni)
