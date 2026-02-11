@@ -8,10 +8,23 @@ from dataclasses import dataclass
 class TaskResult:
     accuracy: float
     wpm: float
+    cpm: float
     errors: int
 
 
 class TypingSession:
+    """Tracks a typing practice session across multiple tasks.
+
+    Speed metrics follow the Tux Typing / standard methodology:
+      * **CPM** – correct characters per minute.
+      * **Gross WPM** – (total characters / 5) / elapsed minutes.
+      * **Net WPM** – (total chars − 5 × errors) / 5 / elapsed minutes,
+        floored at 0.  This penalises errors the way Tux Typing does.
+
+    The public ``wpm`` / ``aggregate_wpm`` surfaces the *net* WPM so that
+    the displayed speed already accounts for mistakes.
+    """
+
     def __init__(self, tasks: list[str], start_index: int = 0) -> None:
         self._tasks = tasks
         self._index = start_index
@@ -19,6 +32,8 @@ class TypingSession:
         self._total_chars = 0
         self._total_correct = 0
         self._total_errors = 0
+
+    # -- properties ----------------------------------------------------------
 
     @property
     def index(self) -> int:
@@ -36,6 +51,8 @@ class TypingSession:
     def total_correct(self) -> int:
         return self._total_correct
 
+    # -- task flow -----------------------------------------------------------
+
     def current_task(self) -> str:
         return self._tasks[self._index]
 
@@ -44,7 +61,7 @@ class TypingSession:
 
     def submit(self, typed: str) -> TaskResult:
         if self._index >= len(self._tasks):
-            return TaskResult(accuracy=0.0, wpm=0.0, errors=0)
+            return TaskResult(accuracy=0.0, wpm=0.0, cpm=0.0, errors=0)
         target = self._tasks[self._index]
         correct = sum(1 for a, b in zip(typed, target) if a == b)
         total = max(len(target), len(typed))
@@ -54,21 +71,41 @@ class TypingSession:
         self._total_errors += errors
 
         elapsed_minutes = max((time.time() - self._start_time) / 60.0, 1e-6)
-        gross_wpm = (self._total_chars / 5.0) / elapsed_minutes
+
+        # CPM: correct characters per minute
+        cpm = self._total_correct / elapsed_minutes
+
+        # Net WPM: penalise errors (5 chars per error) then convert to words
+        net_wpm = max(0.0, (self._total_chars - 5 * self._total_errors) / 5.0 / elapsed_minutes)
+
         accuracy = (correct / total) * 100.0 if total else 0.0
         self._index += 1
 
         return TaskResult(
             accuracy=accuracy,
-            wpm=gross_wpm,
+            wpm=net_wpm,
+            cpm=cpm,
             errors=errors,
         )
+
+    # -- aggregate stats -----------------------------------------------------
 
     def aggregate_accuracy(self) -> float:
         total = max(self._total_chars, 1)
         return (self._total_correct / total) * 100.0
 
+    def aggregate_cpm(self) -> float:
+        """Correct characters per minute."""
+        elapsed_minutes = max((time.time() - self._start_time) / 60.0, 1e-6)
+        return self._total_correct / elapsed_minutes
+
     def aggregate_wpm(self) -> float:
+        """Net WPM (error-adjusted): (total_chars − 5 × errors) / 5 / minutes."""
+        elapsed_minutes = max((time.time() - self._start_time) / 60.0, 1e-6)
+        return max(0.0, (self._total_chars - 5 * self._total_errors) / 5.0 / elapsed_minutes)
+
+    def aggregate_gross_wpm(self) -> float:
+        """Gross WPM (no error penalty): total_chars / 5 / minutes."""
         elapsed_minutes = max((time.time() - self._start_time) / 60.0, 1e-6)
         return (self._total_chars / 5.0) / elapsed_minutes
 

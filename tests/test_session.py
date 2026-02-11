@@ -15,14 +15,15 @@ from thattan.core.session import TaskResult, TypingSession
 
 class TestTaskResult:
     def test_creation(self):
-        tr = TaskResult(accuracy=95.0, wpm=40.0, errors=2)
+        tr = TaskResult(accuracy=95.0, wpm=40.0, cpm=200.0, errors=2)
         assert tr.accuracy == 95.0
         assert tr.wpm == 40.0
+        assert tr.cpm == 200.0
         assert tr.errors == 2
 
     def test_equality(self):
-        a = TaskResult(accuracy=95.0, wpm=40.0, errors=2)
-        b = TaskResult(accuracy=95.0, wpm=40.0, errors=2)
+        a = TaskResult(accuracy=95.0, wpm=40.0, cpm=200.0, errors=2)
+        b = TaskResult(accuracy=95.0, wpm=40.0, cpm=200.0, errors=2)
         assert a == b
 
 
@@ -163,9 +164,9 @@ class TestSubmit:
         s = TypingSession(["a"])
         s.submit("a")
         result = s.submit("whatever")
-        assert result == TaskResult(accuracy=0.0, wpm=0.0, errors=0)
+        assert result == TaskResult(accuracy=0.0, wpm=0.0, cpm=0.0, errors=0)
 
-    def test_wpm_is_positive(self):
+    def test_wpm_is_positive_on_perfect(self):
         s = TypingSession(["hello world"])
         result = s.submit("hello world")
         assert result.wpm > 0
@@ -175,6 +176,86 @@ class TestSubmit:
         s.submit("ab")  # 2 correct, 0 errors
         s.submit("cx")  # 1 correct, 1 error
         assert s.total_correct == 3
+
+    def test_result_has_cpm(self):
+        s = TypingSession(["hello"])
+        result = s.submit("hello")
+        assert result.cpm > 0
+
+
+# ---------------------------------------------------------------------------
+# TypingSession – net WPM (error penalty)
+# ---------------------------------------------------------------------------
+
+class TestNetWpm:
+    def test_perfect_typing_net_equals_gross(self):
+        """With zero errors, net WPM should equal gross WPM."""
+        s = TypingSession(["abc"])
+        result = s.submit("abc")
+        gross = s.aggregate_gross_wpm()
+        net = s.aggregate_wpm()
+        assert net == pytest.approx(gross)
+
+    def test_errors_reduce_net_wpm(self):
+        """Errors should lower net WPM relative to gross."""
+        s = TypingSession(["abcde"])
+        s.submit("axxxx")  # 1 correct, 4 errors
+        gross = s.aggregate_gross_wpm()
+        net = s.aggregate_wpm()
+        assert net < gross
+
+    def test_net_wpm_floors_at_zero(self):
+        """Net WPM should never go negative even with many errors."""
+        s = TypingSession(["ab"])
+        s.submit("xy")  # 0 correct, 2 errors; penalty = 10 chars > total = 2
+        assert s.aggregate_wpm() == 0.0
+
+    def test_submit_wpm_matches_aggregate(self):
+        """The wpm returned by submit() should match aggregate_wpm()."""
+        s = TypingSession(["hello"])
+        result = s.submit("hello")
+        # They won't be exactly equal due to microsecond time differences,
+        # but should be very close
+        assert result.wpm > 0
+        assert s.aggregate_wpm() > 0
+
+
+# ---------------------------------------------------------------------------
+# TypingSession – CPM
+# ---------------------------------------------------------------------------
+
+class TestCpm:
+    def test_cpm_correct_chars_only(self):
+        """CPM should reflect only correct characters."""
+        s = TypingSession(["abcd"])
+        s.submit("abxy")  # 2 correct out of 4
+        cpm = s.aggregate_cpm()
+        # 2 correct chars / some tiny elapsed time -> CPM > 0
+        assert cpm > 0
+        # gross equivalent would be higher (4 chars)
+        gross_char_rate = s.aggregate_gross_wpm() * 5
+        assert cpm < gross_char_rate
+
+    def test_cpm_zero_when_all_wrong(self):
+        """CPM should be ~0 when nothing is correct (0 correct chars)."""
+        s = TypingSession(["abc"])
+        s.submit("xyz")
+        assert s.aggregate_cpm() == pytest.approx(0.0, abs=0.01)
+
+    def test_cpm_positive_on_perfect(self):
+        s = TypingSession(["hello"])
+        s.submit("hello")
+        assert s.aggregate_cpm() > 0
+
+    def test_cpm_no_submissions(self):
+        s = TypingSession(["abc"])
+        assert s.aggregate_cpm() == pytest.approx(0.0, abs=0.01)
+
+    def test_submit_cpm_matches_aggregate(self):
+        s = TypingSession(["hello"])
+        result = s.submit("hello")
+        assert result.cpm > 0
+        assert s.aggregate_cpm() > 0
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +290,11 @@ class TestAggregates:
         # 0 chars / some time -> 0 wpm (approximately)
         assert s.aggregate_wpm() == pytest.approx(0.0, abs=0.01)
 
+    def test_aggregate_gross_wpm_positive(self):
+        s = TypingSession(["hello"])
+        s.submit("hello")
+        assert s.aggregate_gross_wpm() > 0
+
     def test_aggregate_errors(self):
         s = TypingSession(["ab", "cd"])
         s.submit("ax")  # 1 error
@@ -229,10 +315,10 @@ class TestWpmCalculation:
         """WPM should increase if more chars typed in same time."""
         s1 = TypingSession(["a"])
         s1.submit("a")
-        wpm1 = s1.aggregate_wpm()
+        wpm1 = s1.aggregate_gross_wpm()
 
         s2 = TypingSession(["abcdefghij"])
         s2.submit("abcdefghij")
-        wpm2 = s2.aggregate_wpm()
+        wpm2 = s2.aggregate_gross_wpm()
 
         assert wpm2 > wpm1  # more chars -> higher WPM
