@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QPoint, QSize
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
     QIcon,
     QLinearGradient,
     QPainter,
-    QPen,
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
@@ -31,7 +30,7 @@ from thattan.ui.colors import HomeColors
 
 class AspectRatioWidget(QWidget):
     """Widget that maintains a fixed aspect ratio"""
-    def __init__(self, aspect_ratio: float = 2.45, parent: Optional[QWidget] = None):
+    def __init__(self, aspect_ratio: float = 2.45, parent: QWidget | None = None):
         super().__init__(parent)
         self._aspect_ratio = aspect_ratio
         # Use Expanding policy for both to allow proper scaling
@@ -73,7 +72,7 @@ class AspectRatioWidget(QWidget):
 class CoolBackground(QWidget):
     """Gradient background with subtle decorative shapes (light theme)."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
@@ -127,9 +126,9 @@ class HomeProgressBar(QWidget):
 
     def __init__(
         self,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         *,
-        track_color: Optional[str] = None,
+        track_color: str | None = None,
         show_percentage: bool = False,
         height: int = 10,
     ) -> None:
@@ -143,7 +142,7 @@ class HomeProgressBar(QWidget):
         self.setFixedHeight(height)
         self.setMinimumWidth(100)
 
-    def set_progress(self, value: int, max_value: int, color_start: Optional[str] = None, color_end: Optional[str] = None) -> None:
+    def set_progress(self, value: int, max_value: int, color_start: str | None = None, color_end: str | None = None) -> None:
         self._value = int(value)
         self._max_value = int(max_value) if int(max_value) > 0 else 1
         if color_start:
@@ -197,7 +196,7 @@ class HomeProgressBar(QWidget):
 class ProgressCard(QFrame):
     """Progress block matching the glass UI: முன்னேற்றம் label, fraction, rounded bar with % on fill."""
 
-    def __init__(self, parent: Optional[QWidget] = None, *, embedded: bool = False) -> None:
+    def __init__(self, parent: QWidget | None = None, *, embedded: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("progressCard")
         if embedded:
@@ -271,7 +270,7 @@ class ProgressCard(QFrame):
 class GlassCard(QFrame):
     """Glassmorphism card (ported from `test.py`)."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("glassCard")
         self.setStyleSheet(
@@ -291,7 +290,7 @@ class GlassCard(QFrame):
 
 
 class HomeStatCard(QFrame):
-    def __init__(self, icon: str, label: str, value: str, bg_color: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, icon: str, label: str, value: str, bg_color: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._bg_color = bg_color
         self.setObjectName("homeStatCard")
@@ -341,9 +340,9 @@ class HomeLevelRowCard(QFrame):
         selected: bool,
         completed: bool,
         on_click: Callable[[str], None],
-        on_restart: Optional[Callable[[str], None]] = None,
-        on_view: Optional[Callable[[str], None]] = None,
-        parent: Optional[QWidget] = None,
+        on_restart: Callable[[str], None] | None = None,
+        on_view: Callable[[str], None] | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._level_key = level_key

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, QSize, QEvent, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (
     QFrame,
@@ -95,7 +95,7 @@ class ResetConfirmOverlay(QWidget):
 
     closed = Signal(bool)  # True if user confirmed reset
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         main_layout = QGridLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -206,7 +206,7 @@ class LevelCompletedOverlay(QWidget):
 
     closed = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         main_layout = QGridLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)

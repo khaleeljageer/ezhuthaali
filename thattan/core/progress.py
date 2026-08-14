@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,7 @@ class LevelProgress:
     best_accuracy: float = 0.0
 
 
-def _default_gamification() -> Dict[str, int]:
+def _default_gamification() -> dict[str, int]:
     return {"total_score": 0, "current_streak": 0, "best_streak": 0}
 
 
@@ -32,7 +31,7 @@ class ProgressStore:
     def get_level_progress(self, level_key: str) -> LevelProgress:
         return self._progress.get(level_key, LevelProgress())
 
-    def get_gamification(self) -> Tuple[int, int, int]:
+    def get_gamification(self) -> tuple[int, int, int]:
         """Return (total_score, current_streak, best_streak)."""
         g = self._gamification
         return (
@@ -81,8 +80,8 @@ class ProgressStore:
         """Persist current state to disk (e.g. on app exit)."""
         self._save()
 
-    def _load(self) -> Tuple[Dict[str, LevelProgress], Dict[str, int]]:
-        progress: Dict[str, LevelProgress] = {}
+    def _load(self) -> tuple[dict[str, LevelProgress], dict[str, int]]:
+        progress: dict[str, LevelProgress] = {}
         gamification = _default_gamification()
         if not self._file_path.exists():
             return progress, gamification

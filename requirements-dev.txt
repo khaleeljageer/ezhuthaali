@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=7.0
+ruff>=0.16
+mypy>=2.0
+types-PyYAML

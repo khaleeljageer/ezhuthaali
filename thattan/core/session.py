@@ -46,7 +46,7 @@ class TypingSession:
         if self._index >= len(self._tasks):
             return TaskResult(accuracy=0.0, wpm=0.0, errors=0)
         target = self._tasks[self._index]
-        correct = sum(1 for a, b in zip(typed, target) if a == b)
+        correct = sum(1 for a, b in zip(typed, target, strict=False) if a == b)
         total = max(len(target), len(typed))
         errors = total - correct
         self._total_chars += total

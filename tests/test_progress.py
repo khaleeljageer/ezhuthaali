@@ -9,7 +9,6 @@ import pytest
 
 from thattan.core.progress import LevelProgress, ProgressStore, _default_gamification
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

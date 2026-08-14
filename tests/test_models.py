@@ -7,7 +7,6 @@ import pytest
 from thattan.core.levels import Level
 from thattan.ui.models import LevelState
 
-
 # ===========================================================================
 # LevelState dataclass
 # ===========================================================================

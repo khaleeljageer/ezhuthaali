@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
 
 import yaml
 
@@ -12,25 +11,25 @@ import yaml
 class Level:
     key: str
     name: str
-    tasks: List[str]
+    tasks: list[str]
 
 
 class LevelRepository:
     def __init__(self) -> None:
         self._levels = self._load_levels()
 
-    def all(self) -> List[Level]:
+    def all(self) -> list[Level]:
         return list(self._levels.values())
 
     def get(self, key: str) -> Level:
         return self._levels[key]
 
-    def _load_levels(self) -> Dict[str, Level]:
+    def _load_levels(self) -> dict[str, Level]:
         base_dir = Path(__file__).resolve().parent.parent / "data" / "levels"
         if not base_dir.exists():
             raise FileNotFoundError(f"Levels directory not found: {base_dir}")
 
-        levels: Dict[str, Level] = {}
+        levels: dict[str, Level] = {}
 
         def _sort_key(p: Path) -> tuple[int, str]:
             m = re.match(r"^level(\d+)$", p.stem)

@@ -8,7 +8,6 @@ import pytest
 
 from thattan.core.session import TaskResult, TypingSession
 
-
 # ---------------------------------------------------------------------------
 # TaskResult dataclass
 # ---------------------------------------------------------------------------

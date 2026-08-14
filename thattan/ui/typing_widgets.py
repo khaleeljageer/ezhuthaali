@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QWidget
@@ -14,7 +12,7 @@ from thattan.ui.colors import HomeColors
 class LetterSequenceWidget(QWidget):
     """Horizontal row of boxes: completed (✓), current (teal), upcoming (gray)."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._letters: list[str] = []
         self._current_index: int = 0
@@ -69,7 +67,7 @@ class LetterSequenceWidget(QWidget):
 class HeroLetterLabel(QLabel):
     """Large teal circle with current character (like test.py HeroLetter)."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(120, 120)

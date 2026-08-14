@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -35,7 +35,7 @@ class LevelCard(QWidget):
         base_color: str,
         text_color: str,
         on_click: Callable[[str], None],
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._base_color = base_color
@@ -259,7 +259,7 @@ class LevelMapWidget(QWidget):
         self,
         *,
         on_level_clicked: Callable[[str], None],
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_level_clicked = on_level_clicked
@@ -348,7 +348,7 @@ class LevelMapWidget(QWidget):
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
 
-        for a, b in zip(visible, visible[1:]):
+        for a, b in zip(visible, visible[1:], strict=False):
             pa = a.geometry().center()
             pb = b.geometry().center()
             start = QPointF(pa.x(), pa.y())

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from thattan.ui.colors import HomeColors, blend_hex
 
-
 # ===========================================================================
 # HomeColors – constants exist
 # ===========================================================================

@@ -2,11 +2,11 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QGuiApplication, QFontDatabase, QFont, QIcon
+from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
-from thattan.core.progress import ProgressStore
 from thattan.core.levels import LevelRepository
+from thattan.core.progress import ProgressStore
 from thattan.ui.main_window import MainWindow
 
 
@@ -21,11 +21,11 @@ def load_application_font(app: QApplication) -> None:
     """Load and set TAU-Marutham as the default font for the application"""
     # Get the font file path
     font_path = Path(__file__).parent / "assets" / "TAU-Marutham.ttf"
-    
+
     if not font_path.exists():
         logging.warning(f"Font file not found: {font_path}")
         return
-    
+
     # Load the font
     font_id = QFontDatabase.addApplicationFont(str(font_path))
     if font_id == -1:

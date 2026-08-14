@@ -128,6 +128,18 @@ thattan/                        # ← repo root (git clone creates this)
 └── README.md
 ```
 
+### Linting, Type Checking & Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m ruff check .
+python -m mypy
+python -m pytest tests/ -v
+```
+
+`mypy` is scoped to `thattan.core` — PySide6's stubs don't declare the `Qt.AlignCenter`-style
+enum shortcuts used throughout `thattan.ui`, so type-checking that layer is left to `ruff` for now.
+
 ## License
 
 This project is released as open source.

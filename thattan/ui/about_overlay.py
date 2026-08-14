@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
-from PySide6.QtCore import Qt, QSize, QEvent, Signal, QUrl
+from PySide6.QtCore import QEvent, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QFrame,
@@ -29,7 +28,7 @@ class AboutOverlay(QWidget):
 
     closed = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         main_layout = QGridLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
